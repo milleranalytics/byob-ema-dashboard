@@ -4,20 +4,22 @@
 import streamlit as st
 import pandas as pd
 import datetime
+import pytz
+from datetime import timedelta
+import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.ticker as ticker
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import calendar
-import datetime
 import io
 
 # Page config
 st.set_page_config(page_title="BYOB EMA Dashboard", layout="wide")
 
 # Title
-st.title("BYOB EMA Dashboard")
+st.title("BYOB 5/40 EMA Backtest Dashboard")
 st.markdown("**$2.60 Target Credit, 1.5X Stops**")
 
 
@@ -475,125 +477,179 @@ def display_matplotlib_highdpi(fig, dpi=300):
 
 
 # -----------------------------------------------------
+# --- 📈 Standard Figure Template to ensure charts are the same
+# -----------------------------------------------------
+def create_standard_fig(rows=1, cols=1, row_heights=None, vertical_spacing=0.1, height=600, theme="auto"):
+    """
+    Create a standard plotly figure with preset dark/light theme, margins, and sizing.
+    """
+
+    # Detect if in dark mode
+    theme_bg = st.get_option("theme.backgroundColor")
+    is_dark = True  # Default to dark
+    if theme == "light":
+        is_dark = False
+    elif theme == "dark":
+        is_dark = True
+    elif theme_bg is not None and theme_bg.lower() == "#ffffff":
+        is_dark = False
+
+    fig = make_subplots(
+        rows=rows,
+        cols=cols,
+        shared_xaxes=True,
+        vertical_spacing=vertical_spacing,
+        row_heights=row_heights
+    )
+
+    fig.update_layout(
+        template="plotly_dark" if is_dark else "plotly_white",
+        height=height,
+        margin=dict(l=20, r=20, t=30, b=20),
+        font=dict(color="white" if is_dark else "black"),
+        paper_bgcolor="rgba(0,0,0,0)" if is_dark else "white",
+        plot_bgcolor="rgba(0,0,0,0)" if is_dark else "white",
+        showlegend=False
+    )
+
+    return fig, is_dark  # ✅ return both the figure and the dark mode flag
+
+# -----------------------------------------------------
+# --- 📋 Standard Table Template
+# -----------------------------------------------------
+def create_standard_table(df, negative_cols=None, decimals=1, theme="auto", height=None):
+    """
+    Create a standard plotly Table styled to match Streamlit dark/light mode.
+    
+    Parameters:
+    - df (DataFrame): Pandas DataFrame to display
+    - negative_cols (List[str], optional): Columns where negative numbers should be red
+    - decimals (int): Number of decimals to show
+    - theme (str): "auto", "dark", or "light"
+    - height (int, optional): Manually set table height if needed
+    """
+
+    # --- Theme detection
+    theme_bg = st.get_option("theme.backgroundColor")
+    is_dark = True  # default
+    if theme == "light":
+        is_dark = False
+    elif theme == "dark":
+        is_dark = True
+    elif theme_bg is not None and theme_bg.lower() == "#ffffff":
+        is_dark = False
+
+    # --- Colors
+    header_fill = '#262730' if is_dark else '#f7f7f7'
+    header_font = 'white' if is_dark else 'black'
+    cell_fill = '#0e1117' if is_dark else 'white'
+    default_font = 'white' if is_dark else 'black'
+    neg_font = 'rgba(234,92,81,1)'
+
+    # --- Build values and font colors
+    values = []
+    font_colors = []
+    fill_colors = []
+
+    # Detect header name for the index column
+    if df.index.name:
+        index_col = df.index.name
+    else:
+        index_col = "Year"
+
+    values.append(df.index.tolist())
+    font_colors.append([default_font] * len(df))
+    fill_colors.append([
+        header_fill if idx == 'AVG' else cell_fill
+        for idx in df.index
+    ])
+
+    for col in df.columns:
+        col_vals = df[col].tolist()
+        formatted = []
+        colors = []
+        backgrounds = []
+
+        for idx, val in enumerate(col_vals):
+            row_label = df.index[idx]
+
+            # Format values
+            if pd.isna(val):
+                formatted.append("-")
+            else:
+                if isinstance(val, (int, float)):
+                    formatted.append(f"{val:.{decimals}f}%")
+                else:
+                    formatted.append(str(val))
+
+            # Font color
+            if negative_cols and col in negative_cols and isinstance(val, (int, float)) and val < 0:
+                colors.append(neg_font)
+            else:
+                colors.append(default_font)
+
+            # Background color
+            if row_label == 'AVG':
+                backgrounds.append(header_fill)  # Subtle highlight for AVG row
+            else:
+                backgrounds.append(cell_fill)
+
+        values.append(formatted)
+        font_colors.append(colors)
+        fill_colors.append(backgrounds)
+
+
+    # --- Create Table
+    fig = go.Figure(data=[go.Table(
+        header=dict(
+            values=[index_col] + list(df.columns),
+            fill_color=header_fill,
+            font_color=header_font,
+            font_size=14,
+            align='center'
+        ),
+        cells=dict(
+            values=values,
+            fill_color=fill_colors,
+            font_color=font_colors,
+            align='center',
+            font_size=14,
+            height=30
+        )
+    )])
+
+    # Auto height if not specified
+    if not height:
+        height = 400 + 30 * len(df)
+
+    fig.update_layout(
+        margin=dict(l=0, r=0, t=0, b=0),
+        height=height
+    )
+
+    return fig
+
+
+# -----------------------------------------------------
 # --- 📊 Visualization Tabs
 # -----------------------------------------------------
-tab1, tab2, tab3, tab4 = st.tabs(["📈 Equity Curve", "📅 Monthly Performance", "🎯 Entries Optimization", "📖 Instructions"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "📈 Equity Curve",
+    "🔎 Entries Optimization",
+    "🔎 Risk Optimization",
+    "🎯 Entry Time PCR",
+    "📈 Entry Time Trends",
+    "🔎 Lookback Optimization",
+    "📖 Instructions"
+])
 
 
 # -----------------------------------------------------
 # --- 📈 Tab 1: Equity Curve + Drawdown
 # -----------------------------------------------------
 
-with tab1:
-    st.subheader(f"Equity Curve and Drawdown ({start_date.date()} to {end_date.date()})")
-
-    equity_curve, full_trades = calculate_equity_curve_with_manual_lookbacks(
-        ema_df=ema_df,
-        start_date=start_date,
-        end_date=end_date,
-        equityStart=equity_start,
-        risk=risk,
-        num_times=num_times,
-        man_near=man_near,
-        man_mid=man_mid,
-        man_long=man_long
-    )
-
-    if equity_curve.empty:
-        st.warning("⚠️ No trades generated for the selected period and parameters.")
-    else:
-        equity_curve_with_dd, max_drawdown = calculate_drawdown(equity_curve)
-        pcr = calculate_pcr(full_trades)
-        cagr, mar_ratio, sortino = calculate_performance_metrics(equity_curve_with_dd)
-
-        metric_col1, metric_col2, metric_col3, metric_col4, metric_col5 = st.columns(5)
-
-        with metric_col1:
-            st.metric(label="CAGR", value=f"{cagr:.2%}")
-        with metric_col2:
-            st.metric(label="MAR Ratio", value=f"{mar_ratio:.2f}")
-        with metric_col3:
-            st.metric(label="Sortino Ratio", value=f"{sortino:.2f}")
-        with metric_col4:
-            st.metric(label="Max Drawdown", value=f"{max_drawdown:.2f}%")
-        with metric_col5:
-            st.metric(label="PCR", value=f"{pcr:.2f}%")
-
-        # --- 📈 Build Subplots ---
-        fig = make_subplots(
-            rows=2, cols=1,
-            shared_xaxes=True,
-            vertical_spacing=0.05,
-            subplot_titles=("Equity Curve (Log Scale)", "Drawdown (%)")
-        )
-
-        # --- Equity Curve ---
-        fig.add_trace(go.Scatter(
-            x=equity_curve_with_dd['Date'],
-            y=equity_curve_with_dd['Equity'],
-            mode='lines',
-            name='Equity Curve',
-            line=dict(width=2),
-            hovertemplate='$%{y:,.0f}<extra></extra>'
-        ), row=1, col=1)
-
-        # --- Drawdown (Area Fill) ---
-        fig.add_trace(go.Scatter(
-            x=equity_curve_with_dd['Date'],
-            y=equity_curve_with_dd['Drawdown'],
-            mode='lines',
-            name='Drawdown (%)',
-            line=dict(width=2, color='rgba(234,92,81)'),
-            fill='tozeroy',  # ✅ Fills area down to y=0
-            fillcolor='rgba(234,92,81,0.12)',  # ✅ Red fill with 15% opacity
-            hovertemplate='%{y:.2f}%<extra></extra>'
-        ), row=2, col=1)
-
-        # --- Update Layout ---
-        fig.update_layout(
-            height=800,
-            showlegend=False,
-            margin=dict(l=50, r=50, t=80, b=50),
-        )
-
-        fig.update_yaxes(type="log", title="Equity ($)", row=1, col=1)
-        fig.update_yaxes(title="Drawdown (%)", row=2, col=1)
-        fig.update_xaxes(title="Date", row=2, col=1)
-
-        st.plotly_chart(fig, use_container_width=True)
-
-        # --- 📅 Expandable Monthly Summary ---
-        with st.expander("📅 Monthly Trading Summary"):
-            monthly_summary = full_trades.groupby(full_trades['Date'].dt.to_period('M')).first()[[
-                'NearLookback', 'MidLookback', 'LongLookback', 'Equity'
-            ]].reset_index()
-
-            for _, row in monthly_summary.iterrows():
-                month_period = row['Date']
-
-                # Filter trades for this month
-                month_trades = full_trades[full_trades['Date'].dt.to_period('M') == month_period]
-
-                # Get unique trading times used
-                selected_times = sorted(month_trades['OpenTime'].unique())
-
-                # Format times for display
-                selected_times_str = ', '.join(selected_times) if selected_times else "No trades"
-
-                st.markdown(
-                    f"**{month_period.strftime('%Y-%m')}**  \n"
-                    f"🔍 Lookbacks: Near={row['NearLookback']}M, Mid={row['MidLookback']}M, Long={row['LongLookback']}M  \n"
-                    f"💰 End Equity: `${row['Equity']:,.2f}`  \n"
-                    f"⏰ Selected Times: {selected_times_str}"
-                )
-                # st.markdown("---")  # Optional separator line
-
-
-# -----------------------------------------------------
-# --- 📅 Tab 2: Monthly Performance
-# -----------------------------------------------------
-
-def display_monthly_performance_table(equity_df, equity_col='Equity'):
+# --- Monthly Performance Table
+def display_monthly_performance_table(equity_df, is_dark=True, equity_col='Equity'):
     df = equity_df.copy()
     df['Month'] = df['Date'].dt.to_period('M')
     df['Year'] = df['Date'].dt.year
@@ -636,88 +692,789 @@ def display_monthly_performance_table(equity_df, equity_col='Equity'):
     pivot.index.name = None
     pivot.columns.name = None
 
-    # Use toggle from sidebar
-    from streamlit import session_state
-    is_dark = session_state.get("theme_override", True) if "theme_override" in session_state else True
+    # --- 🆕 Create Table using your helper --- 
+    fig = create_standard_table(
+        df=pivot,
+        negative_cols=month_order,
+        decimals=1,
+        theme="dark" if is_dark else "light",
+        height=400  # 🧠 Set this smaller instead of auto height!
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab1:
+    st.subheader(f"Equity Curve and Drawdown ({start_date.date()} to {end_date.date()})")
+
+    equity_curve, full_trades = calculate_equity_curve_with_manual_lookbacks(
+        ema_df=ema_df,
+        start_date=start_date,
+        end_date=end_date,
+        equityStart=equity_start,
+        risk=risk,
+        num_times=num_times,
+        man_near=man_near,
+        man_mid=man_mid,
+        man_long=man_long
+    )
+
+    if equity_curve.empty:
+        st.warning("⚠️ No trades generated for the selected period and parameters.")
+    else:
+        equity_curve_with_dd, max_drawdown = calculate_drawdown(equity_curve)
+        pcr = calculate_pcr(full_trades)
+        cagr, mar_ratio, sortino = calculate_performance_metrics(equity_curve_with_dd)
+
+        # --- 📈 Top Metrics Display
+        metrics_col1, metrics_col2, metrics_col3, metrics_col4, metrics_col5 = st.columns([1,1,1,1,1])
+
+        with metrics_col1:
+            st.metric(label="CAGR", value=f"{cagr:.2%}")
+
+        with metrics_col2:
+            st.metric(label="MAR Ratio", value=f"{mar_ratio:.2f}")
+
+        with metrics_col3:
+            st.metric(label="Sortino Ratio", value=f"{sortino:.2f}")
+
+        with metrics_col4:
+            st.metric(label="Max Drawdown", value=f"{max_drawdown:.2f}%")
+
+        with metrics_col5:
+            st.metric(label="PCR", value=f"{pcr:.2f}%")
+
+        # --- 📈 Create Standard Plot ---
+        fig, is_dark = create_standard_fig(rows=2, cols=1, row_heights=[0.6, 0.4], height=800)
+
+        # --- Colors
+        streamlit_red = 'rgba(234,92,81,1)'
+        streamlit_red_fill = 'rgba(234,92,81,0.15)'
+
+        # --- Equity Curve
+        fig.add_trace(go.Scatter(
+            x=equity_curve_with_dd['Date'],
+            y=equity_curve_with_dd['Equity'],
+            mode='lines',
+            name='Equity Curve',
+            line=dict(width=2),
+            hovertemplate='$%{y:,.0f}<extra></extra>'
+        ), row=1, col=1)
+
+        # --- Drawdown
+        fig.add_trace(go.Scatter(
+            x=equity_curve_with_dd['Date'],
+            y=equity_curve_with_dd['Drawdown'],
+            mode='lines',
+            name='Drawdown (%)',
+            line=dict(width=2, color=streamlit_red),
+            fill='tozeroy',
+            fillcolor=streamlit_red_fill,
+            hovertemplate='%{y:.2f}%<extra></extra>'
+        ), row=2, col=1)
+
+        # --- Axis Titles
+        fig.update_yaxes(title_text="Equity ($)", row=1, col=1)
+        fig.update_yaxes(title_text="Drawdown (%)", row=2, col=1)
+
+        # --- Show
+        st.plotly_chart(fig, use_container_width=True)
+
+        # --- 📅 Monthly Performance Table ---
+        st.subheader("Monthly Performance Table")
+
+        if equity_curve.empty:
+            st.warning("⚠️ No data available to generate monthly performance.")
+        else:
+            display_monthly_performance_table(equity_curve_with_dd, is_dark=True)
+
+        # --- 📅 Expandable Monthly Summary ---
+        with st.expander("📅 Monthly Trading Summary"):
+            monthly_summary = full_trades.groupby(full_trades['Date'].dt.to_period('M')).first()[[
+                'NearLookback', 'MidLookback', 'LongLookback', 'Equity'
+            ]].reset_index()
+
+            for _, row in monthly_summary.iterrows():
+                month_period = row['Date']
+
+                # Filter trades for this month
+                month_trades = full_trades[full_trades['Date'].dt.to_period('M') == month_period]
+
+                # Get unique trading times used
+                selected_times = sorted(month_trades['OpenTime'].unique())
+
+                # Format times for display
+                selected_times_str = ', '.join(selected_times) if selected_times else "No trades"
+
+                st.markdown(
+                    f"**{month_period.strftime('%Y-%m')}**  \n"
+                    f"🔍 Lookbacks: Near={row['NearLookback']}M, Mid={row['MidLookback']}M, Long={row['LongLookback']}M  \n"
+                    f"💰 End Equity: `${row['Equity']:,.2f}`  \n"
+                    f"⏰ Selected Times: {selected_times_str}"
+                )
 
 
-    # Theme colors
+# -----------------------------------------------------
+# --- 🎯 Tab 2: Entries Optimization
+# -----------------------------------------------------
+def optimize_num_entries_with_manual_lookbacks(
+    ema_df, num_times_range, equityStart, risk, start_date, end_date, man_near, man_mid, man_long,
+    performance_func
+):
+    """
+    Optimize number of entries for manual lookbacks, returning CAGR, MAR, Sortino, and Max Drawdown.
+    """
+
+    results = []
+
+    # Streamlit loading spinner
+    with st.spinner("🔄 Optimizing number of entries..."):
+        for num_times in num_times_range:
+            daily_equity_manual, _ = calculate_equity_curve_with_manual_lookbacks(
+                ema_df=ema_df,
+                start_date=start_date,
+                end_date=end_date,
+                equityStart=equityStart,
+                risk=risk,
+                num_times=num_times,
+                man_near=man_near,
+                man_mid=man_mid,
+                man_long=man_long
+            )
+
+            if daily_equity_manual.empty:
+                continue
+
+            cagr, mar, sortino = performance_func(daily_equity_manual)
+            _, max_drawdown = calculate_drawdown(daily_equity_manual)
+
+            results.append({
+                'NumEntries': num_times,
+                'CAGR': cagr,
+                'MAR': mar,
+                'Sortino': sortino,
+                'MaxDrawdown': max_drawdown
+            })
+
+    if not results:
+        st.error("❌ No valid results found for the provided num_times range.")
+        return pd.DataFrame()
+
+    return pd.DataFrame(results)
+
+# --- 📈 Cached Optimization Sweep
+@st.cache_data(show_spinner=False)
+def run_num_entries_sweep(ema_df, start_date, end_date, equity_start, risk, man_near, man_mid, man_long):
+    return optimize_num_entries_with_manual_lookbacks(
+        ema_df=ema_df,
+        num_times_range=range(3, 21),
+        equityStart=equity_start,
+        risk=risk,
+        start_date=start_date,
+        end_date=end_date,
+        man_near=man_near,
+        man_mid=man_mid,
+        man_long=man_long,
+        performance_func=calculate_performance_metrics
+    )
+
+
+# --- Inside Tab 2:
+with tab2:
+    st.subheader(f"🎯 Entries Optimization Analysis ({start_date.date()} to {end_date.date()})")
+
+    num_times_range = range(3, 21)
+
+    if ema_df.empty:
+        st.warning("⚠️ No data available.")
+    else:
+        # ✅ Now call the cached sweep function
+        optimization_results = run_num_entries_sweep(
+            ema_df=ema_df,
+            start_date=start_date,
+            end_date=end_date,
+            equity_start=equity_start,
+            risk=risk,
+            man_near=man_near,
+            man_mid=man_mid,
+            man_long=man_long
+        )
+
+        if optimization_results.empty:
+            st.warning("⚠️ No valid optimization results.")
+        else:
+            # --- Plot each performance metric separately
+            metrics_to_plot = [
+                ("CAGR", "CAGR", None),
+                ("MAR Ratio", "MAR", "#2ca02c"),
+                ("Sortino Ratio", "Sortino", "#9467bd"),
+                ("Max Drawdown (%)", "MaxDrawdown", "rgba(234,92,81,1)")
+            ]
+
+            for metric_title, metric_column, color in metrics_to_plot:
+                fig = go.Figure()
+
+                fig.add_trace(go.Scatter(
+                    x=optimization_results['NumEntries'],
+                    y=optimization_results[metric_column],
+                    mode='lines+markers',
+                    marker=dict(size=6),
+                    line=dict(width=2) if color is None else dict(width=2, color=color),
+                    name=metric_title,
+                ))
+
+                fig.add_vline(
+                    x=num_times,
+                    line_dash="dash",
+                    line_color="rgba(234,234,234,0.4)",
+                    line_width=1,
+                    opacity=0.8
+                )
+
+                # 🧠 Only format CAGR y-axis as %  
+                if metric_column == "CAGR":
+                    yaxis_tickformat = ".0%"
+                    hovertemplate = '%{y:.2%}<extra></extra>'
+                else:
+                    yaxis_tickformat = None
+                    hovertemplate = '%{y:.2f}<extra></extra>'
+
+                fig.data[0].hovertemplate = hovertemplate
+
+                fig.update_layout(
+                    template="plotly_dark",
+                    title=metric_title,
+                    xaxis_title="Number of Entries",
+                    yaxis_title=metric_title,
+                    xaxis=dict(tickmode='linear', dtick=1),
+                    yaxis_tickformat=yaxis_tickformat,
+                    height=400,
+                    margin=dict(l=20, r=20, t=40, b=20)
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+# -----------------------------------------------------
+# --- 📈 Tab 3: Risk Optimization
+# -----------------------------------------------------
+
+# --- 📈 Helper: Optimize Risk (with caching)
+@st.cache_data(show_spinner=True)
+def optimize_risk_for_manual_lookbacks_cached(
+    ema_df, num_times, risk_range, step_size, start_date, end_date, equityStart, man_near, man_mid, man_long
+):
+    risks = np.arange(risk_range[0], risk_range[1] + step_size, step_size)
+    results = []
+
+    for risk in risks:
+        daily_equity, _ = calculate_equity_curve_with_manual_lookbacks(
+            ema_df=ema_df,
+            start_date=start_date,
+            end_date=end_date,
+            equityStart=equityStart,
+            risk=risk,
+            num_times=num_times,
+            man_near=man_near,
+            man_mid=man_mid,
+            man_long=man_long
+        )
+
+        if daily_equity.empty:
+            continue
+
+        cagr, mar, sortino = calculate_performance_metrics(daily_equity)
+        _, max_drawdown = calculate_drawdown(daily_equity)
+
+        results.append({
+            'Risk': risk,
+            'CAGR': cagr,
+            'MAR': mar,
+            'Sortino': sortino,
+            'MaxDrawdown': max_drawdown
+        })
+
+    if not results:
+        return pd.DataFrame(columns=['Risk', 'CAGR', 'MAR', 'Sortino', 'MaxDrawdown'])
+
+    return pd.DataFrame(results).sort_values(by='Risk')
+
+# --- Inside Tab 3
+with tab3:
+    st.subheader(f"🔎 Risk Optimization ({start_date.date()} to {end_date.date()})")
+
+    if ema_df.empty:
+        st.warning("⚠️ No data available.")
+    else:
+        risk_range = (0.8, 6.0)  # ✅ Default risk range (0.8% to 6%)
+        step_size = 0.2
+
+        optimization_results_risk = optimize_risk_for_manual_lookbacks_cached(
+            ema_df=ema_df,
+            num_times=num_times,
+            risk_range=risk_range,
+            step_size=step_size,
+            start_date=start_date,
+            end_date=end_date,
+            equityStart=equity_start,
+            man_near=man_near,
+            man_mid=man_mid,
+            man_long=man_long
+        )
+
+        if optimization_results_risk.empty:
+            st.warning("⚠️ No valid optimization results.")
+        else:
+            # --- Metrics to Plot
+            metrics_to_plot = [
+                ("CAGR", "CAGR", None),
+                ("MAR Ratio", "MAR", "#2ca02c"),
+                ("Sortino Ratio", "Sortino", "#9467bd"),
+                ("Max Drawdown (%)", "MaxDrawdown", "rgba(234,92,81,1)")
+            ]
+
+            for metric_title, metric_column, color in metrics_to_plot:
+                fig = go.Figure()
+
+                fig.add_trace(go.Scatter(
+                    x=optimization_results_risk['Risk'],
+                    y=optimization_results_risk[metric_column],
+                    mode='lines+markers',
+                    marker=dict(size=6),
+                    line=dict(width=2) if color is None else dict(width=2, color=color),
+                    name=metric_title,
+                ))
+
+                # --- Add vertical line for selected risk
+                fig.add_vline(
+                    x=risk,
+                    line_dash="dash",
+                    line_color="rgba(234,234,234,0.4)",  # subtle gray
+                    line_width=1,
+                    opacity=0.8
+                )
+
+                # --- Only format CAGR axis as %
+                if metric_column == "CAGR":
+                    yaxis_tickformat = ".0%"
+                    hovertemplate = '%{y:.2%}<extra></extra>'
+                else:
+                    yaxis_tickformat = None
+                    hovertemplate = '%{y:.2f}<extra></extra>'
+
+                # Apply hover
+                fig.data[0].hovertemplate = hovertemplate
+
+                fig.update_layout(
+                    template="plotly_dark",
+                    title=metric_title,
+                    xaxis_title="Risk (%)",
+                    yaxis_title=metric_title,
+                    xaxis=dict(tickmode='linear', dtick=1),
+                    yaxis_tickformat=yaxis_tickformat,
+                    height=400,
+                    margin=dict(l=20, r=20, t=40, b=20)
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+
+# -----------------------------------------------------
+# --- 🎯 Tab 4: Entry Time PCR
+# -----------------------------------------------------
+# --- Function to generate the simple PCR Table ---
+def plot_pcr_analysis_single(filtered_ema_df, is_dark=True):
+    """
+    Plot a single table showing PremiumCapture and PCR (%) averages by OpenTimeFormatted with value shading.
+    """
+    if filtered_ema_df.empty:
+        st.warning("⚠️ No trades found in the selected date range.")
+        return
+
+    df = filtered_ema_df.copy()
+
+    # --- Group by OpenTimeFormatted
+    pcr_df = (
+        df.groupby('OpenTimeFormatted')
+        .agg({
+            'PCR': 'mean',
+            'PremiumCapture': 'mean'
+        })
+        .reset_index()
+    )
+
+    if pcr_df.empty:
+        st.warning("⚠️ No data after grouping by time.")
+        return
+
+    # --- Calculate %
+    pcr_df['PCR'] = (pcr_df['PCR'] * 100).round(1)
+    pcr_df['PremiumCapture'] = pcr_df['PremiumCapture'].round(2)
+
+    # --- Add AVG row
+    avg_row = {
+        'OpenTimeFormatted': 'AVG',
+        'PremiumCapture': pcr_df['PremiumCapture'].mean().round(2),
+        'PCR': pcr_df['PCR'].mean().round(1)
+    }
+    pcr_df = pd.concat([pcr_df, pd.DataFrame([avg_row])], ignore_index=True)
+
+    # --- Theme-aware colors
     header_fill = '#262730' if is_dark else '#f7f7f7'
     header_font = 'white' if is_dark else 'black'
     cell_fill = '#0e1117' if is_dark else 'white'
     default_font = 'white' if is_dark else 'black'
-    neg_font = 'rgba(234,92,81,1)'
 
-    # Build values matrix and font color list
-    values = [list(pivot.index)]
-    font_colors = [ [default_font] * len(pivot.index) ]  # For index column
+    # --- Normalize values for PremiumCapture and PCR
+    def normalize_series(series):
+        if series.max() - series.min() == 0:
+            return series * 0  # avoid divide by zero
+        return (series - series.min()) / (series.max() - series.min())
 
-    for col in pivot.columns:
-        col_vals = pivot[col].apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else "-").tolist()
-        values.append(col_vals)
+    norm_pcr = normalize_series(pcr_df['PCR'])
+    norm_premium = normalize_series(pcr_df['PremiumCapture'])
 
-        # Handle font coloring
-        col_colors = []
-        for idx, val in pivot[col].items():
-            is_negative = (
-                col in month_order and
-                isinstance(val, (int, float)) and
-                pd.notnull(val) and val < 0
-            )
-            col_colors.append(neg_font if is_negative else default_font)
-        font_colors.append(col_colors)
+    # --- Matplotlib colormap (RdYlGn)
+    cmap = plt.cm.RdYlGn
 
+    # --- Build the columns (now PremiumCapture first, PCR second)
+    columns = ['OpenTimeFormatted', 'PremiumCapture', 'PCR']
+
+    values = []
+    font_colors = []
+    fill_colors = []
+
+    for col in columns:
+        col_vals = pcr_df[col].tolist()
+        formatted = []
+        fonts = []
+        backgrounds = []
+
+        for idx, val in enumerate(col_vals):
+            row_label = pcr_df['OpenTimeFormatted'].iloc[idx]
+
+            # --- Format values
+            if pd.isna(val):
+                formatted.append("-")
+            elif isinstance(val, (int, float)):
+                if col == 'PremiumCapture':
+                    formatted.append(f"${val:.2f}")
+                elif col == 'PCR':
+                    formatted.append(f"{val:.1f}%")
+                else:
+                    formatted.append(str(val))
+            else:
+                formatted.append(str(val))
+
+            fonts.append(default_font)
+
+            # --- Background shading
+            if row_label == 'AVG':
+                backgrounds.append(header_fill)
+            else:
+                if col == 'PCR':
+                    rgba = cmap(norm_pcr[idx])
+                    backgrounds.append(f'rgba({int(rgba[0]*255)}, {int(rgba[1]*255)}, {int(rgba[2]*255)}, 0.5)')
+                elif col == 'PremiumCapture':
+                    rgba = cmap(norm_premium[idx])
+                    backgrounds.append(f'rgba({int(rgba[0]*255)}, {int(rgba[1]*255)}, {int(rgba[2]*255)}, 0.5)')
+                else:
+                    backgrounds.append(cell_fill)
+
+        values.append(formatted)
+        font_colors.append(fonts)
+        fill_colors.append(backgrounds)
+
+    # --- Dynamic height
+    base_height = 400
+    row_extra = 30 * len(pcr_df)
+    final_height = base_height + row_extra
+
+    # --- Create table
     fig = go.Figure(data=[go.Table(
         header=dict(
-            values=["Year"] + list(pivot.columns),
+            values=["Open Time", "Premium Capture", "PCR (%)"],  # Update headers
             fill_color=header_fill,
             font_color=header_font,
+            font_size=14,
             align='center'
         ),
         cells=dict(
             values=values,
-            fill_color=cell_fill,
+            fill_color=fill_colors,
             font_color=font_colors,
             align='center',
-            font_size=12,
+            font_size=14,
             height=30
         )
     )])
 
     fig.update_layout(
         margin=dict(l=0, r=0, t=10, b=0),
-        height=400 + 30 * len(pivot)
+        height=final_height
     )
 
     st.plotly_chart(fig, use_container_width=True)
 
-with tab2:
-    st.subheader("Monthly Performance Table")
-    
-    if equity_curve.empty:
-        st.warning("⚠️ No data available to generate monthly performance.")
-    else:
-        display_monthly_performance_table(equity_curve_with_dd)
 
-# -----------------------------------------------------
-# --- 🎯 Tab 3: Entries Optimization
-# -----------------------------------------------------
-with tab3:
-    st.subheader("Entries Optimization")
-    st.info("Chart coming soon...")  # (Placeholder for now)
-
-
-# -----------------------------------------------------
-# --- 📖 Tab 4: Documentation
-# -----------------------------------------------------
+# --- 📅 Tab 4: Entry Time PCR
 with tab4:
+    st.subheader("🎯 Entry Time PCR")
+
+    if ema_df.empty:
+        st.warning("⚠️ No data available.")
+    else:
+        # --- Get min/max dates for defaults
+        min_date = ema_df['OpenDate'].min().date()
+        max_date = ema_df['OpenDate'].max().date()
+
+        # --- User selects dates (default: full range)
+        col1, col2 = st.columns(2)
+        with col1:
+            pcr_start_date = st.date_input("Start Date", value=min_date, min_value=min_date, max_value=max_date)
+        with col2:
+            pcr_end_date = st.date_input("End Date", value=max_date, min_value=min_date, max_value=max_date)
+
+        # --- Filter EMA data
+        mask = (ema_df['OpenDate'] >= pd.to_datetime(pcr_start_date)) & (ema_df['OpenDate'] <= pd.to_datetime(pcr_end_date))
+        filtered_ema_df = ema_df.loc[mask]
+
+        # --- Get dark mode info
+        theme_bg = st.get_option("theme.backgroundColor")
+        is_dark = True if (theme_bg is None or theme_bg.lower() != "#ffffff") else False
+
+        # --- Generate Table
+        plot_pcr_analysis_single(filtered_ema_df, is_dark=is_dark)
+
+
+
+# -----------------------------------------------------
+# --- 📈 Tab 5: Entry Time Trends
+# -----------------------------------------------------
+def create_time_pcr_table(df, selected_times=None, timezone='US/Central', is_dark=True):
+    import numpy as np
+    import matplotlib.pyplot as plt
+    import matplotlib.cm as cm
+    import matplotlib.colors as mcolors
+
+    # --- Dark/Light mode setup
+    cmap = cm.get_cmap('RdYlGn')
+    cell_fill = 'rgba(30,30,30,1)' if is_dark else 'rgba(245,245,245,1)'
+    header_fill = 'rgba(50,50,50,1)' if is_dark else 'rgba(230,230,230,1)'
+    header_font_color = 'white' if is_dark else 'black'
+
+    # --- Correct Local Time
+    local_offset = {
+        'US/Eastern': 0,
+        'US/Central': -1,
+        'US/Mountain': -2,
+        'US/Pacific': -3
+    }.get(timezone, -1)
+
+    df['LocalTime'] = pd.to_datetime(df['OpenTime'], format='%H:%M') + pd.to_timedelta(local_offset, unit='h')
+    df['LocalTime'] = df['LocalTime'].dt.strftime('%I:%M %p')
+
+    # --- Selected Times Column
+    if selected_times is not None:
+        df['Selected'] = df['OpenTime'].isin(selected_times).map({True: '✅', False: ''})
+    else:
+        df['Selected'] = ''
+
+    # --- Insert Gaps for spacing
+    gap = [""] * len(df)
+    df.insert(4, 'Gap1', gap)
+    df.insert(7, 'Gap2', gap)
+    df.insert(10, 'Gap3', gap)
+
+    # --- Final Column Order
+    columns_order = [
+        'LocalTime', 'OpenTime',
+        'Far_Premium', 'Far_PCR', 'Gap1',
+        'Mid_Premium', 'Mid_PCR', 'Gap2',
+        'Near_Premium', 'Near_PCR', 'Gap3',
+        'Avg_Premium', 'Avg_PCR', 'Selected'
+    ]
+    df = df[columns_order]
+
+    # --- Format Premium/PCR Columns
+    for col in df.columns:
+        if '_Premium' in col:
+            df[col] = df[col].map('${:,.2f}'.format)
+        elif '_PCR' in col:
+            df[col] = df[col].astype(float).round(1).astype(str) + '%'
+
+    # --- Add AVG Row
+    avg_row = {}
+    for col in df.columns:
+        if '_Premium' in col or '_PCR' in col:
+            clean_col = df[col].replace('[\$,%,]', '', regex=True).astype(float)
+            avg_val = clean_col.mean()
+            if '_Premium' in col:
+                avg_row[col] = f"${avg_val:.2f}"
+            elif '_PCR' in col:
+                avg_row[col] = f"{avg_val:.2f}%"
+        else:
+            avg_row[col] = 'AVG' if col == 'LocalTime' else ''
+
+    df = pd.concat([df, pd.DataFrame([avg_row])], ignore_index=True)
+
+    # --- Background shading
+    cell_colors = []
+    for col in df.columns:
+        if '_Premium' in col or '_PCR' in col:
+            clean_col = df[col].replace('[\$,%,]', '', regex=True).astype(float)
+            if clean_col.max() == clean_col.min():
+                norm_col = np.zeros_like(clean_col)
+            else:
+                norm = mcolors.Normalize(vmin=clean_col.min(), vmax=clean_col.max())
+                norm_col = norm(clean_col)
+
+            backgrounds = []
+            for idx, val in enumerate(norm_col):
+                if idx == len(df) - 1:  # AVG row
+                    backgrounds.append(header_fill)
+                else:
+                    rgba = cmap(val)
+                    backgrounds.append(f'rgba({int(rgba[0]*255)}, {int(rgba[1]*255)}, {int(rgba[2]*255)}, 0.5)')
+            cell_colors.append(backgrounds)
+        else:
+            backgrounds = [header_fill if idx == len(df) - 1 else cell_fill for idx in range(len(df))]
+            cell_colors.append(backgrounds)
+
+    # --- Build Table
+    fig = go.Figure(data=[go.Table(
+        columnwidth=[80, 80, 80, 80, 10, 80, 80, 10, 80, 80, 10, 80, 80, 50],
+        header=dict(
+            values=[col if not col.startswith('Gap') else '' for col in df.columns],
+            fill_color=header_fill,
+            align='center',
+            font=dict(color=header_font_color, size=14)
+        ),
+        cells=dict(
+            values=[df[col] for col in df.columns],
+            fill_color=cell_colors,
+            align='center',
+            font=dict(color=header_font_color, size=14),
+            height=30
+        )
+    )])
+
+    fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=900)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+with tab5:
+
+    st.subheader(f"🎯 Entry Time PCR Analysis")
+
+    if ema_df.empty:
+        st.warning("⚠️ No data available.")
+    else:
+        min_date = ema_df['OpenDate'].min().date()
+        max_date = ema_df['OpenDate'].max().date()
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            next_trading_day = st.date_input(
+                "Next Trading Day to Simulate",
+                value=max_date + datetime.timedelta(days=1),
+                min_value=min_date,
+                max_value=max_date + datetime.timedelta(days=5)
+            )
+
+        with col2:
+            timezone = st.selectbox(
+                "Display Timezone for Local Time",
+                options=["US/Eastern", "US/Central", "US/Mountain", "US/Pacific"],
+                index=1  # Central default
+            )
+
+        # --- ✅ Define lookback calculator and dictionary BEFORE using it
+        def calculate_lookback_range(base_date, months_back):
+            end = pd.to_datetime(base_date) - pd.Timedelta(days=1)
+            start = end - pd.DateOffset(months=months_back)
+            return start, end
+
+        lookbacks = {
+            'Far': man_long,
+            'Mid': man_mid,
+            'Near': man_near
+        }
+
+        # --- 📅 Show Lookback Date Ranges
+        st.markdown("#### Lookback Date Ranges Used")
+
+        for label, months in lookbacks.items():
+            lb_start, lb_end = calculate_lookback_range(next_trading_day, months)
+            st.markdown(
+                f"**{label} Lookback**: {months} months — {lb_start.strftime('%m/%d/%Y')} to {lb_end.strftime('%m/%d/%Y')}"
+            )
+
+        # --- 📈 Build Lookback Tables
+        lookback_tables = {}
+
+        for label, months in lookbacks.items():
+            lb_start, lb_end = calculate_lookback_range(next_trading_day, months)
+
+            mask = (ema_df['OpenDate'] >= lb_start) & (ema_df['OpenDate'] <= lb_end)
+            df = ema_df.loc[mask]
+
+            if df.empty:
+                st.warning(f"⚠️ No data found for {label} Lookback ({lb_start.date()} to {lb_end.date()})")
+                continue
+
+            pcr_table = df.groupby('OpenTimeFormatted').agg({
+                'PremiumCapture': 'mean',
+                'PCR': 'mean'
+            }).reset_index()
+
+            pcr_table.rename(columns={"OpenTimeFormatted": "OpenTime"}, inplace=True)
+            lookback_tables[label] = pcr_table
+
+        # --- 📈 Merge Lookbacks into Combined Table
+        if lookback_tables:
+            combined = lookback_tables['Far'].copy()
+            combined = combined.rename(columns={"PremiumCapture": "Far_Premium", "PCR": "Far_PCR"})
+            combined = combined.merge(
+                lookback_tables['Mid'].rename(columns={"PremiumCapture": "Mid_Premium", "PCR": "Mid_PCR"}),
+                on="OpenTime", how="outer")
+            combined = combined.merge(
+                lookback_tables['Near'].rename(columns={"PremiumCapture": "Near_Premium", "PCR": "Near_PCR"}),
+                on="OpenTime", how="outer")
+
+            # --- Calculate Average
+            combined['Avg_Premium'] = combined[['Far_Premium', 'Mid_Premium', 'Near_Premium']].mean(axis=1)
+            combined['Avg_PCR'] = combined[['Far_PCR', 'Mid_PCR', 'Near_PCR']].mean(axis=1)
+
+            # --- Multiply PCR to %
+            for col in ['Far_PCR', 'Mid_PCR', 'Near_PCR', 'Avg_PCR']:
+                combined[col] = combined[col] * 100
+
+            # --- Select Top N Times
+            top_times = combined.sort_values(by='Avg_PCR', ascending=False).head(num_times)['OpenTime'].tolist()
+
+            # --- Create Final Table
+            create_time_pcr_table(combined, selected_times=top_times, timezone=timezone, is_dark=True)
+
+
+    
+
+# -----------------------------------------------------
+# --- 🔎 Tab 6: Lookback Optimization
+# -----------------------------------------------------
+with tab6:
+    st.subheader("🔎 Lookback Optimization")
+    st.info("Sweep of different lookback window settings coming here.")
+
+# -----------------------------------------------------
+# --- 📖 Tab 7: Documentation
+# -----------------------------------------------------
+with tab7:
     st.subheader("📖 Instructions and Strategy Assumptions")
 
     try:
         with open("README.md", "r", encoding="utf-8") as f:
             readme_content = f.read()
-
         st.markdown(readme_content, unsafe_allow_html=True)
-
     except FileNotFoundError:
         st.error("❌ README.md file not found. Please add it to your project directory.")
+
