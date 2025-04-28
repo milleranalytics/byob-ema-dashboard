@@ -459,22 +459,6 @@ def calculate_equity_curve_with_manual_lookbacks(
 
     return daily_equity, filtered_results
 
-# --- 🎨 Helper Function: Display Matplotlib High-DPI in Streamlit
-
-def display_matplotlib_highdpi(fig, dpi=300):
-    """
-    Render a Matplotlib figure in Streamlit at high DPI with no auto-resizing.
-
-    Parameters:
-        fig (matplotlib.figure.Figure): The Matplotlib figure to display.
-        dpi (int): Dots per inch for rendering resolution (default 300).
-    """
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=dpi, bbox_inches='tight')
-    buf.seek(0)
-    
-    st.image(buf, use_column_width=False)  # 🚨 critical: stop Streamlit from resizing automatically!
-
 
 # -----------------------------------------------------
 # --- 📈 Standard Figure Template to ensure charts are the same
@@ -698,7 +682,7 @@ def display_monthly_performance_table(equity_df, is_dark=True, equity_col='Equit
         negative_cols=month_order,
         decimals=1,
         theme="dark" if is_dark else "light",
-        height=400  # 🧠 Set this smaller instead of auto height!
+        height=250  # 🧠 Set this smaller instead of auto height!
     )
 
     st.plotly_chart(fig, use_container_width=True)
@@ -789,28 +773,32 @@ with tab1:
 
         # --- 📅 Expandable Monthly Summary ---
         with st.expander("📅 Monthly Trading Summary"):
-            monthly_summary = full_trades.groupby(full_trades['Date'].dt.to_period('M')).first()[[
-                'NearLookback', 'MidLookback', 'LongLookback', 'Equity'
-            ]].reset_index()
+            monthly_summary = full_trades.groupby(full_trades['Date'].dt.to_period('M'))
 
-            for _, row in monthly_summary.iterrows():
-                month_period = row['Date']
+            for month_period, month_trades in monthly_summary:
+                st.markdown(f"#### {month_period.strftime('%Y-%m')}")
 
-                # Filter trades for this month
-                month_trades = full_trades[full_trades['Date'].dt.to_period('M') == month_period]
-
-                # Get unique trading times used
+                # --- Selected Times
                 selected_times = sorted(month_trades['OpenTime'].unique())
-
-                # Format times for display
                 selected_times_str = ', '.join(selected_times) if selected_times else "No trades"
 
-                st.markdown(
-                    f"**{month_period.strftime('%Y-%m')}**  \n"
-                    f"🔍 Lookbacks: Near={row['NearLookback']}M, Mid={row['MidLookback']}M, Long={row['LongLookback']}M  \n"
-                    f"💰 End Equity: `${row['Equity']:,.2f}`  \n"
-                    f"⏰ Selected Times: {selected_times_str}"
-                )
+                # --- End Equity (last trade of month)
+                end_equity = month_trades['Equity'].iloc[-1]
+
+                # --- Lookback Ranges
+                far_start = month_trades['LongLookbackStart'].min()
+                far_end = month_trades['LongLookbackEnd'].max()
+                mid_start = month_trades['MidLookbackStart'].min()
+                mid_end = month_trades['MidLookbackEnd'].max()
+                near_start = month_trades['NearLookbackStart'].min()
+                near_end = month_trades['NearLookbackEnd'].max()
+
+                # --- Show Details
+                st.markdown(f"📅 **Far Lookback:** {man_long} months — {far_start.strftime('%m/%d/%Y')} to {far_end.strftime('%m/%d/%Y')}")
+                st.markdown(f"📅 **Mid Lookback:** {man_mid} months — {mid_start.strftime('%m/%d/%Y')} to {mid_end.strftime('%m/%d/%Y')}")
+                st.markdown(f"📅 **Near Lookback:** {man_near} months — {near_start.strftime('%m/%d/%Y')} to {near_end.strftime('%m/%d/%Y')}")
+                st.markdown(f"⏰ **Selected Times:** {selected_times_str}")
+                st.markdown(f"💵 **End Equity:** ${end_equity:,.2f}")
 
 
 # -----------------------------------------------------
@@ -880,7 +868,7 @@ def run_num_entries_sweep(ema_df, start_date, end_date, equity_start, risk, man_
 
 # --- Inside Tab 2:
 with tab2:
-    st.subheader(f"🎯 Entries Optimization Analysis ({start_date.date()} to {end_date.date()})")
+    st.subheader(f"Entries Optimization Analysis ({start_date.date()} to {end_date.date()})")
 
     num_times_range = range(3, 21)
 
@@ -999,7 +987,7 @@ def optimize_risk_for_manual_lookbacks_cached(
 
 # --- Inside Tab 3
 with tab3:
-    st.subheader(f"🔎 Risk Optimization ({start_date.date()} to {end_date.date()})")
+    st.subheader(f"Risk Optimization ({start_date.date()} to {end_date.date()})")
 
     if ema_df.empty:
         st.warning("⚠️ No data available.")
@@ -1079,175 +1067,6 @@ with tab3:
 
 # -----------------------------------------------------
 # --- 🎯 Tab 4: Entry Time PCR
-# -----------------------------------------------------
-# --- Function to generate the simple PCR Table ---
-def plot_pcr_analysis_single(filtered_ema_df, is_dark=True):
-    """
-    Plot a single table showing PremiumCapture and PCR (%) averages by OpenTimeFormatted with value shading.
-    """
-    if filtered_ema_df.empty:
-        st.warning("⚠️ No trades found in the selected date range.")
-        return
-
-    df = filtered_ema_df.copy()
-
-    # --- Group by OpenTimeFormatted
-    pcr_df = (
-        df.groupby('OpenTimeFormatted')
-        .agg({
-            'PCR': 'mean',
-            'PremiumCapture': 'mean'
-        })
-        .reset_index()
-    )
-
-    if pcr_df.empty:
-        st.warning("⚠️ No data after grouping by time.")
-        return
-
-    # --- Calculate %
-    pcr_df['PCR'] = (pcr_df['PCR'] * 100).round(1)
-    pcr_df['PremiumCapture'] = pcr_df['PremiumCapture'].round(2)
-
-    # --- Add AVG row
-    avg_row = {
-        'OpenTimeFormatted': 'AVG',
-        'PremiumCapture': pcr_df['PremiumCapture'].mean().round(2),
-        'PCR': pcr_df['PCR'].mean().round(1)
-    }
-    pcr_df = pd.concat([pcr_df, pd.DataFrame([avg_row])], ignore_index=True)
-
-    # --- Theme-aware colors
-    header_fill = '#262730' if is_dark else '#f7f7f7'
-    header_font = 'white' if is_dark else 'black'
-    cell_fill = '#0e1117' if is_dark else 'white'
-    default_font = 'white' if is_dark else 'black'
-
-    # --- Normalize values for PremiumCapture and PCR
-    def normalize_series(series):
-        if series.max() - series.min() == 0:
-            return series * 0  # avoid divide by zero
-        return (series - series.min()) / (series.max() - series.min())
-
-    norm_pcr = normalize_series(pcr_df['PCR'])
-    norm_premium = normalize_series(pcr_df['PremiumCapture'])
-
-    # --- Matplotlib colormap (RdYlGn)
-    cmap = plt.cm.RdYlGn
-
-    # --- Build the columns (now PremiumCapture first, PCR second)
-    columns = ['OpenTimeFormatted', 'PremiumCapture', 'PCR']
-
-    values = []
-    font_colors = []
-    fill_colors = []
-
-    for col in columns:
-        col_vals = pcr_df[col].tolist()
-        formatted = []
-        fonts = []
-        backgrounds = []
-
-        for idx, val in enumerate(col_vals):
-            row_label = pcr_df['OpenTimeFormatted'].iloc[idx]
-
-            # --- Format values
-            if pd.isna(val):
-                formatted.append("-")
-            elif isinstance(val, (int, float)):
-                if col == 'PremiumCapture':
-                    formatted.append(f"${val:.2f}")
-                elif col == 'PCR':
-                    formatted.append(f"{val:.1f}%")
-                else:
-                    formatted.append(str(val))
-            else:
-                formatted.append(str(val))
-
-            fonts.append(default_font)
-
-            # --- Background shading
-            if row_label == 'AVG':
-                backgrounds.append(header_fill)
-            else:
-                if col == 'PCR':
-                    rgba = cmap(norm_pcr[idx])
-                    backgrounds.append(f'rgba({int(rgba[0]*255)}, {int(rgba[1]*255)}, {int(rgba[2]*255)}, 0.5)')
-                elif col == 'PremiumCapture':
-                    rgba = cmap(norm_premium[idx])
-                    backgrounds.append(f'rgba({int(rgba[0]*255)}, {int(rgba[1]*255)}, {int(rgba[2]*255)}, 0.5)')
-                else:
-                    backgrounds.append(cell_fill)
-
-        values.append(formatted)
-        font_colors.append(fonts)
-        fill_colors.append(backgrounds)
-
-    # --- Dynamic height
-    base_height = 400
-    row_extra = 30 * len(pcr_df)
-    final_height = base_height + row_extra
-
-    # --- Create table
-    fig = go.Figure(data=[go.Table(
-        header=dict(
-            values=["Open Time", "Premium Capture", "PCR (%)"],  # Update headers
-            fill_color=header_fill,
-            font_color=header_font,
-            font_size=14,
-            align='center'
-        ),
-        cells=dict(
-            values=values,
-            fill_color=fill_colors,
-            font_color=font_colors,
-            align='center',
-            font_size=14,
-            height=30
-        )
-    )])
-
-    fig.update_layout(
-        margin=dict(l=0, r=0, t=10, b=0),
-        height=final_height
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-
-# --- 📅 Tab 4: Entry Time PCR
-with tab4:
-    st.subheader("🎯 Entry Time PCR")
-
-    if ema_df.empty:
-        st.warning("⚠️ No data available.")
-    else:
-        # --- Get min/max dates for defaults
-        min_date = ema_df['OpenDate'].min().date()
-        max_date = ema_df['OpenDate'].max().date()
-
-        # --- User selects dates (default: full range)
-        col1, col2 = st.columns(2)
-        with col1:
-            pcr_start_date = st.date_input("Start Date", value=min_date, min_value=min_date, max_value=max_date)
-        with col2:
-            pcr_end_date = st.date_input("End Date", value=max_date, min_value=min_date, max_value=max_date)
-
-        # --- Filter EMA data
-        mask = (ema_df['OpenDate'] >= pd.to_datetime(pcr_start_date)) & (ema_df['OpenDate'] <= pd.to_datetime(pcr_end_date))
-        filtered_ema_df = ema_df.loc[mask]
-
-        # --- Get dark mode info
-        theme_bg = st.get_option("theme.backgroundColor")
-        is_dark = True if (theme_bg is None or theme_bg.lower() != "#ffffff") else False
-
-        # --- Generate Table
-        plot_pcr_analysis_single(filtered_ema_df, is_dark=is_dark)
-
-
-
-# -----------------------------------------------------
-# --- 📈 Tab 5: Entry Time Trends
 # -----------------------------------------------------
 def create_time_pcr_table(df, selected_times=None, timezone='US/Central', is_dark=True):
     import numpy as np
@@ -1357,13 +1176,13 @@ def create_time_pcr_table(df, selected_times=None, timezone='US/Central', is_dar
         )
     )])
 
-    fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=900)
+    fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=800)
     st.plotly_chart(fig, use_container_width=True)
 
 
-with tab5:
+with tab4:
 
-    st.subheader(f"🎯 Entry Time PCR Analysis")
+    st.subheader(f"Entry Time PCR Analysis")
 
     if ema_df.empty:
         st.warning("⚠️ No data available.")
@@ -1390,8 +1209,9 @@ with tab5:
 
         # --- ✅ Define lookback calculator and dictionary BEFORE using it
         def calculate_lookback_range(base_date, months_back):
-            end = pd.to_datetime(base_date) - pd.Timedelta(days=1)
-            start = end - pd.DateOffset(months=months_back)
+            base = pd.to_datetime(base_date)
+            start = base - pd.DateOffset(months=months_back)
+            end = base - pd.Timedelta(days=1)
             return start, end
 
         lookbacks = {
@@ -1399,15 +1219,6 @@ with tab5:
             'Mid': man_mid,
             'Near': man_near
         }
-
-        # --- 📅 Show Lookback Date Ranges
-        st.markdown("#### Lookback Date Ranges Used")
-
-        for label, months in lookbacks.items():
-            lb_start, lb_end = calculate_lookback_range(next_trading_day, months)
-            st.markdown(
-                f"**{label} Lookback**: {months} months — {lb_start.strftime('%m/%d/%Y')} to {lb_end.strftime('%m/%d/%Y')}"
-            )
 
         # --- 📈 Build Lookback Tables
         lookback_tables = {}
@@ -1455,7 +1266,183 @@ with tab5:
             # --- Create Final Table
             create_time_pcr_table(combined, selected_times=top_times, timezone=timezone, is_dark=True)
 
+        # --- 📅 Lookback Ranges and Selected Times side-by-side
+        left_col, right_col = st.columns(2)
 
+        with left_col:
+            st.markdown("#### Lookback Date Ranges Used")
+            for label, months in lookbacks.items():
+                lb_start, lb_end = calculate_lookback_range(next_trading_day, months)
+                st.markdown(
+                    f"**{label} Lookback:** {months} months — {lb_start.strftime('%m/%d/%Y')} to {lb_end.strftime('%m/%d/%Y')}"
+                )
+
+        with right_col:
+            st.markdown("#### Selected Times")
+
+            top_times_sorted = sorted(top_times) if top_times else []
+
+            if top_times_sorted:
+                # Join all times into a single line, comma separated
+                selected_times_str = ', '.join(top_times_sorted)
+                st.markdown(f"**{selected_times_str}**")
+            else:
+                st.markdown("No times selected.")
+
+
+
+# -----------------------------------------------------
+# --- 📈 Tab 5: Entry Time Trends
+# -----------------------------------------------------
+# --- 📈 Full Slot Equity Curve Visualization Function
+def plot_slot_equity_curves_plotly(
+    daily_slot_pnl,
+    ema_df,
+    ranking_window=120,
+    smoothing_window=20,
+    smoothing_type='SMA',
+    selected_times=None,
+    columns=2,
+    lookback_end=None
+):
+    """
+    Plot cumulative PnL and rolling average for each entry time using Plotly.
+
+    Parameters:
+    - daily_slot_pnl: DataFrame of daily PnL by OpenDate and OpenTimeFormatted.
+    - ema_df: Original full EMA dataset (for WinRate/PCR calculation).
+    - ranking_window: Number of most recent trading days to analyze.
+    - smoothing_window: Window size for moving average smoothing.
+    - smoothing_type: 'SMA' or 'EMA' for smoothing.
+    - selected_times: Optional list of times to filter.
+    - columns: Number of chart columns in grid.
+    - lookback_end: Optional cutoff date (defaults to no cutoff).
+    """
+
+    df = daily_slot_pnl.copy().sort_values('OpenDate')
+
+    # --- Filter by lookback end if provided
+    if lookback_end is not None:
+        df = df[df['OpenDate'] <= lookback_end]
+
+    # --- Focus on last N trading days
+    recent_dates = (
+        df['OpenDate']
+        .drop_duplicates()
+        .sort_values()
+        .tail(ranking_window)
+    )
+    filtered = df[df['OpenDate'].isin(recent_dates)]
+
+    # --- Pivot for cumulative PnL
+    pivot = filtered.pivot(index='OpenDate', columns='OpenTimeFormatted', values='DailyPnL').fillna(0)
+
+    if selected_times is not None:
+        pivot = pivot[selected_times]
+
+    cumulative_pnl = pivot.cumsum()
+
+    if smoothing_type.upper() == "EMA":
+        rolling_avg = cumulative_pnl.ewm(span=smoothing_window, min_periods=1).mean()
+    else:
+        rolling_avg = cumulative_pnl.rolling(window=smoothing_window, min_periods=1).mean()
+
+    # --- Summarize Win Rate and PCR
+    summary_stats = ema_df[
+        ema_df['OpenDate'].isin(recent_dates)
+    ].groupby('OpenTimeFormatted').agg(
+        TotalTrades=('PremiumCapture', 'count'),
+        Wins=('PremiumCapture', lambda x: (x > 0).sum()),
+        TotalPremiumCaptured=('PremiumCapture', 'sum'),
+        TotalPremiumSold=('Premium', lambda x: (x * 100).sum())
+    ).assign(
+        WinRate=lambda df: (df['Wins'] / df['TotalTrades']) * 100,
+        PCR=lambda df: (df['TotalPremiumCaptured'] / df['TotalPremiumSold']) * 100
+    )
+
+    # --- Grid Layout
+    num_slots = len(pivot.columns)
+    rows = (num_slots + columns - 1) // columns
+
+    fig = make_subplots(
+        rows=rows, cols=columns,
+        subplot_titles=[
+            f"{slot} | Win: {summary_stats.loc[slot, 'WinRate']:.1f}% | PCR: {summary_stats.loc[slot, 'PCR']:.1f}%"
+            if slot in summary_stats.index else f"{slot}"
+            for slot in pivot.columns
+        ]
+    )
+
+    # --- Add Cumulative and Rolling lines per slot
+    for idx, slot in enumerate(pivot.columns):
+        r = (idx // columns) + 1
+        c = (idx % columns) + 1
+
+        fig.add_trace(
+            go.Scatter(
+                x=cumulative_pnl.index, y=cumulative_pnl[slot] * 100,
+                mode='lines', name=f'{slot} Cumulative',
+                line=dict(width=2, color="#6d6af3"),  # <<<<< Fixed color (adjust if you want)
+                hovertemplate='%{y:.2f}%<extra></extra>'
+            ),
+            row=r, col=c
+        )
+
+        # --- Rolling Average Line
+        fig.add_trace(
+            go.Scatter(
+                x=rolling_avg.index, y=rolling_avg[slot] * 100,
+                mode='lines', name=f'{slot} Rolling',
+                line=dict(width=1.5, dash='dash', color='gray'),  # <<<<< Rolling line gray
+                hovertemplate='%{y:.2f}%<extra></extra>'
+            ),
+            row=r, col=c
+        )
+
+    # --- Final Layout Settings
+    fig.update_layout(
+        height=400 * rows,
+        title_text="Slot Equity Trends by Time",
+        showlegend=False,
+        margin=dict(t=50, l=20, r=20, b=20)
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+with tab5:
+    st.subheader("🔎 Entry Time Trends")
+    # --- 📈 User Controls for Slot Equity Curves
+    col1, col2, col3 = st.columns([2, 2, 1])
+
+    with col1:
+        ranking_window = st.slider("Analysis Lookback Days", min_value=30, max_value=365, value=120)
+
+    with col2:
+        smoothing_window = st.slider("Smoothing Window (Days)", min_value=5, max_value=60, value=20)
+
+    with col3:
+        smoothing_type = st.selectbox("Smoothing Type", options=["SMA", "EMA"], index=0)
+
+    # --- 📈 Create Daily PnL per Slot
+    ema_df['DailyPnL'] = ema_df['PremiumCapture']  # Already per-contract
+
+    daily_slot_pnl = (
+        ema_df
+        .groupby(['OpenDate', 'OpenTimeFormatted'], as_index=False)
+        .agg({'DailyPnL': 'sum'})
+    )
+
+    plot_slot_equity_curves_plotly(
+        daily_slot_pnl=daily_slot_pnl,
+        ema_df=ema_df,
+        ranking_window=ranking_window,
+        smoothing_window=smoothing_window,
+        smoothing_type=smoothing_type,
+        selected_times=None,
+        columns=2,
+        lookback_end=pd.to_datetime(end_date)
+    )
     
 
 # -----------------------------------------------------
