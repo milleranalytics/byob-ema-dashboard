@@ -14,6 +14,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import calendar
 import io
+from itertools import product
+from dateutil.relativedelta import relativedelta
 
 # Page config
 st.set_page_config(page_title="BYOB EMA Dashboard", layout="wide")
@@ -757,7 +759,7 @@ with tab1:
         ), row=2, col=1)
 
         # --- Axis Titles
-        fig.update_yaxes(title_text="Equity ($)", row=1, col=1)
+        fig.update_yaxes(title_text="Equity ($)", type="log", row=1, col=1)
         fig.update_yaxes(title_text="Drawdown (%)", row=2, col=1)
 
         # --- Show
@@ -799,6 +801,7 @@ with tab1:
                 st.markdown(f"📅 **Near Lookback:** {man_near} months — {near_start.strftime('%m/%d/%Y')} to {near_end.strftime('%m/%d/%Y')}")
                 st.markdown(f"⏰ **Selected Times:** {selected_times_str}")
                 st.markdown(f"💵 **End Equity:** ${end_equity:,.2f}")
+
 
 
 # -----------------------------------------------------
@@ -866,7 +869,7 @@ def run_num_entries_sweep(ema_df, start_date, end_date, equity_start, risk, man_
     )
 
 
-# --- Inside Tab 2:
+# --- 🎯 Tab 2: Entries Optimization
 with tab2:
     st.subheader(f"Entries Optimization Analysis ({start_date.date()} to {end_date.date()})")
 
@@ -875,7 +878,7 @@ with tab2:
     if ema_df.empty:
         st.warning("⚠️ No data available.")
     else:
-        # ✅ Now call the cached sweep function
+        # ✅ Cached sweep function
         optimization_results = run_num_entries_sweep(
             ema_df=ema_df,
             start_date=start_date,
@@ -890,7 +893,10 @@ with tab2:
         if optimization_results.empty:
             st.warning("⚠️ No valid optimization results.")
         else:
-            # --- Plot each performance metric separately
+            # --- 📈 Split into two columns
+            col1, col2 = st.columns(2)
+
+            # --- Metrics to plot
             metrics_to_plot = [
                 ("CAGR", "CAGR", None),
                 ("MAR Ratio", "MAR", "#2ca02c"),
@@ -898,8 +904,9 @@ with tab2:
                 ("Max Drawdown (%)", "MaxDrawdown", "rgba(234,92,81,1)")
             ]
 
-            for metric_title, metric_column, color in metrics_to_plot:
-                fig = go.Figure()
+            for idx, (metric_title, metric_column, color) in enumerate(metrics_to_plot):
+                # 🆕 Use standard figure template
+                fig, is_dark = create_standard_fig(height=400)
 
                 fig.add_trace(go.Scatter(
                     x=optimization_results['NumEntries'],
@@ -929,17 +936,22 @@ with tab2:
                 fig.data[0].hovertemplate = hovertemplate
 
                 fig.update_layout(
-                    template="plotly_dark",
                     title=metric_title,
                     xaxis_title="Number of Entries",
                     yaxis_title=metric_title,
                     xaxis=dict(tickmode='linear', dtick=1),
                     yaxis_tickformat=yaxis_tickformat,
-                    height=400,
-                    margin=dict(l=20, r=20, t=40, b=20)
                 )
 
-                st.plotly_chart(fig, use_container_width=True)
+                # --- 📈 Alternate between columns
+                if idx % 2 == 0:
+                    with col1:
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    with col2:
+                        st.plotly_chart(fig, use_container_width=True)
+
+
 
 # -----------------------------------------------------
 # --- 📈 Tab 3: Risk Optimization
@@ -985,9 +997,9 @@ def optimize_risk_for_manual_lookbacks_cached(
 
     return pd.DataFrame(results).sort_values(by='Risk')
 
-# --- Inside Tab 3
+# --- 📈 Tab 3: Risk Optimization
 with tab3:
-    st.subheader(f"Risk Optimization ({start_date.date()} to {end_date.date()})")
+    st.subheader(f"Risk Optimization Analysis ({start_date.date()} to {end_date.date()})")
 
     if ema_df.empty:
         st.warning("⚠️ No data available.")
@@ -1011,7 +1023,10 @@ with tab3:
         if optimization_results_risk.empty:
             st.warning("⚠️ No valid optimization results.")
         else:
-            # --- Metrics to Plot
+            # --- 📈 Create two columns for the plots
+            col1, col2 = st.columns(2)
+
+            # --- 📈 Metrics to Plot
             metrics_to_plot = [
                 ("CAGR", "CAGR", None),
                 ("MAR Ratio", "MAR", "#2ca02c"),
@@ -1019,8 +1034,9 @@ with tab3:
                 ("Max Drawdown (%)", "MaxDrawdown", "rgba(234,92,81,1)")
             ]
 
-            for metric_title, metric_column, color in metrics_to_plot:
-                fig = go.Figure()
+            for idx, (metric_title, metric_column, color) in enumerate(metrics_to_plot):
+                # 🆕 Use standard figure template
+                fig, is_dark = create_standard_fig(height=400)
 
                 fig.add_trace(go.Scatter(
                     x=optimization_results_risk['Risk'],
@@ -1031,16 +1047,15 @@ with tab3:
                     name=metric_title,
                 ))
 
-                # --- Add vertical line for selected risk
                 fig.add_vline(
                     x=risk,
                     line_dash="dash",
-                    line_color="rgba(234,234,234,0.4)",  # subtle gray
+                    line_color="rgba(234,234,234,0.4)",
                     line_width=1,
                     opacity=0.8
                 )
 
-                # --- Only format CAGR axis as %
+                # 🧠 Only format CAGR y-axis as %  
                 if metric_column == "CAGR":
                     yaxis_tickformat = ".0%"
                     hovertemplate = '%{y:.2%}<extra></extra>'
@@ -1048,21 +1063,24 @@ with tab3:
                     yaxis_tickformat = None
                     hovertemplate = '%{y:.2f}<extra></extra>'
 
-                # Apply hover
                 fig.data[0].hovertemplate = hovertemplate
 
                 fig.update_layout(
-                    template="plotly_dark",
                     title=metric_title,
                     xaxis_title="Risk (%)",
                     yaxis_title=metric_title,
-                    xaxis=dict(tickmode='linear', dtick=1),
+                    xaxis=dict(tickmode='linear'),
                     yaxis_tickformat=yaxis_tickformat,
-                    height=400,
-                    margin=dict(l=20, r=20, t=40, b=20)
                 )
 
-                st.plotly_chart(fig, use_container_width=True)
+                # --- 📈 Alternate between columns
+                if idx % 2 == 0:
+                    with col1:
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    with col2:
+                        st.plotly_chart(fig, use_container_width=True)
+
 
 
 # -----------------------------------------------------
@@ -1411,7 +1429,7 @@ def plot_slot_equity_curves_plotly(
 
 
 with tab5:
-    st.subheader("🔎 Entry Time Trends")
+    st.subheader("Entry Time Trends")
     # --- 📈 User Controls for Slot Equity Curves
     col1, col2, col3 = st.columns([2, 2, 1])
 
@@ -1448,9 +1466,191 @@ with tab5:
 # -----------------------------------------------------
 # --- 🔎 Tab 6: Lookback Optimization
 # -----------------------------------------------------
+# --- 📈 Cached heavy calculation
+@st.cache_data(show_spinner=False)
+def test_lookback_stability_with_overlap_cached(
+    ema_df, entry_range, risk, equityStart, near_range, mid_range, long_range, rolling_windows
+):
+    from itertools import product
+    import pandas as pd
+
+    results = []
+
+    # --- ✅ Pre-filter valid lookback combinations
+    lookback_combinations = [
+        (near, mid, long)
+        for near, mid, long in product(near_range, mid_range, long_range)
+        if near <= mid <= long
+    ]
+
+    for num_times in entry_range:
+        for start_date, end_date in rolling_windows:
+            for man_near, man_mid, man_long in lookback_combinations:
+
+                daily_equity, _ = calculate_equity_curve_with_manual_lookbacks(
+                    ema_df=ema_df,
+                    start_date=start_date,
+                    end_date=end_date,
+                    equityStart=equityStart,
+                    risk=risk,
+                    num_times=num_times,
+                    man_near=man_near,
+                    man_mid=man_mid,
+                    man_long=man_long
+                )
+
+                if daily_equity.empty:
+                    continue
+
+                cagr, _, _ = calculate_performance_metrics(daily_equity)
+
+                results.append({
+                    'Near': man_near,
+                    'Mid': man_mid,
+                    'Long': man_long,
+                    'NumEntries': num_times,
+                    'CAGR': cagr,
+                    'Start': start_date,
+                    'End': end_date
+                })
+
+    results_df = pd.DataFrame(results)
+
+    if results_df.empty:
+        return pd.DataFrame(columns=['Near', 'Mid', 'Long', 'Stability Score'])
+
+    # --- 📊 Compute Rankings
+    results_df['Rank'] = results_df.groupby(['Start', 'End', 'NumEntries'])['CAGR'].rank(ascending=False, method="dense")
+
+    # --- 📈 Calculate Stability Score
+    stability_scores = (
+        results_df.groupby(['Near', 'Mid', 'Long'])['Rank']
+        .mean()
+        .reset_index()
+        .rename(columns={'Rank': 'Stability Score'})
+    )
+
+    # --- ✅ Round Stability Score for nicer display
+    stability_scores['Stability Score'] = stability_scores['Stability Score'].round(2)
+
+    return stability_scores.sort_values(by='Stability Score')
+
+
 with tab6:
-    st.subheader("🔎 Lookback Optimization")
-    st.info("Sweep of different lookback window settings coming here.")
+    st.subheader("Lookback Stability Optimization")
+
+    if ema_df.empty:
+        st.warning("⚠️ No data available.")
+    else:
+        st.markdown("##### Stability Test Settings")
+
+        # --- 📋 Create two columns
+        col1, col2 = st.columns(2)
+
+        with col1:
+            lastDay_default = ema_df['OpenDate'].max().date()
+
+            lastDay = st.date_input(
+                "Select Last Day for Analysis",
+                value=lastDay_default,
+                min_value=ema_df['OpenDate'].min().date(),
+                max_value=lastDay_default
+            )
+
+            entry_min, entry_max = st.slider(
+                "Select Entry Range (Number of Entries per Day)", 
+                min_value=3, max_value=20, 
+                value=(9, 11)
+            )
+
+        with col2:
+            near_min, near_max = st.slider(
+                "Near Lookback Range (Months)", 
+                min_value=1, max_value=6, 
+                value=(2, 5)
+            )
+
+            mid_min, mid_max = st.slider(
+                "Mid Lookback Range (Months)", 
+                min_value=3, max_value=10, 
+                value=(5, 9)
+            )
+
+            long_min, long_max = st.slider(
+                "Long Lookback Range (Months)", 
+                min_value=6, max_value=12, 
+                value=(9, 12)
+            )
+
+        st.markdown("")
+
+        # --- Button to run
+        if st.button("🚀 Run Stability Test"):
+            with st.spinner("🔎 Running stability optimization... this might take a while!"):
+                
+                # --- Build ranges from user input
+                entry_range = range(entry_min, entry_max + 1)
+                near_range = range(near_min, near_max + 1)
+                mid_range = range(mid_min, mid_max + 1)
+                long_range = range(long_min, long_max + 1)
+
+                # --- Prepare rolling windows
+                lastDay_dt = pd.to_datetime(lastDay)
+
+                rolling_windows = [
+                    (lastDay_dt - relativedelta(years=2), lastDay_dt),
+                    (lastDay_dt - relativedelta(months=18), lastDay_dt - relativedelta(months=6)),
+                    (lastDay_dt - relativedelta(years=1), lastDay_dt),
+                    (lastDay_dt - relativedelta(months=6), lastDay_dt)
+                ]
+
+                # --- Run optimization
+                stability_df = test_lookback_stability_with_overlap_cached(
+                    ema_df=ema_df,
+                    entry_range=entry_range,
+                    risk=risk,
+                    equityStart=equity_start,
+                    near_range=near_range,
+                    mid_range=mid_range,
+                    long_range=long_range,
+                    rolling_windows=[(start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')) for start, end in rolling_windows]
+                )
+
+                if stability_df.empty:
+                    st.warning("⚠️ No stable lookbacks found.")
+                else:
+                    num_tests = len(stability_df)
+                    st.success(f"✅ Stability test completed! ({num_tests:,} combinations tested)")
+
+                    # --- Create Plotly Table
+                    fig = go.Figure(data=[go.Table(
+                        header=dict(
+                            values=list(stability_df.head(10).columns),
+                            align='center',
+                            font=dict(size=14, color='white'),
+                            fill_color='rgba(50,50,50,1)',
+                            height=30
+                        ),
+                        cells=dict(
+                            values=[stability_df.head(10)[col] for col in stability_df.head(10).columns],
+                            align='center',
+                            font=dict(size=14),
+                            fill_color='rgba(0,0,0,0)',
+                            height=28
+                        )
+                    )])
+
+                    fig.update_layout(
+                        margin=dict(l=20, r=20, t=30, b=20),
+                        height=400
+                    )
+
+                    # --- Create three columns: empty, table, empty
+                    col1, col2, col3 = st.columns([1, 2, 1])
+
+                    with col2:
+                        st.plotly_chart(fig, use_container_width=True)  # ✅ Middle column only
+
 
 # -----------------------------------------------------
 # --- 📖 Tab 7: Documentation
