@@ -778,7 +778,7 @@ with tab1:
             monthly_summary = full_trades.groupby(full_trades['Date'].dt.to_period('M'))
 
             for month_period, month_trades in monthly_summary:
-                st.markdown(f"#### {month_period.strftime('%Y-%m')}")
+                st.markdown(f"##### {month_period.strftime('%Y-%m')}")
 
                 # --- Selected Times
                 selected_times = sorted(month_trades['OpenTime'].unique())
