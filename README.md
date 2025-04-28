@@ -67,15 +67,3 @@ Welcome to the BYOB EMA Trading Dashboard — a private research tool designed t
 
 🚨 **This dashboard is for research and educational purposes only. Trading involves significant risk and may not be suitable for all investors. Past performance is not necessarily indicative of future results. Always do your own due diligence.**
 
----
-
-## 🎯 Bonus Notes
-
-- The dashboard is structured for modular future upgrades (multi-symbols, volatility filters, dynamic lookbacks, etc.).
-- Charts are standardized for consistent visual style across dark and light themes.
-- Results are easily exportable via screenshots or scrolling captures if needed.
-
----
-
-✅ **Built for private trading research.**  
-✅ **Designed to maximize robustness, minimize bias, and streamline analysis.**
