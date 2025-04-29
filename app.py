@@ -1,21 +1,14 @@
-# -----------------------------------------------------
-# --- 📦 Imports
+# region --- 📦 Imports & Page Config
 # -----------------------------------------------------
 import streamlit as st
 import pandas as pd
 import datetime
-import pytz
-from datetime import timedelta
 import numpy as np
 import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
-import matplotlib.ticker as ticker
 import matplotlib.colors as mcolors
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import calendar
-import io
 from itertools import product
 from dateutil.relativedelta import relativedelta
 import time
@@ -23,16 +16,17 @@ import time
 # Page config
 st.set_page_config(page_title="BYOB EMA Dashboard", layout="wide")
 
+# endregion
+
 # User Inputs
 credit_target=2.50
 
 # Title
-st.title("BYOB 5/40 EMA Backtest Dashboard")
+st.title("BYOB EMA Dashboard")
 st.markdown(f"**${credit_target:.2f} Target Credit, 1.5X Stops**")
 
 
-# -----------------------------------------------------
-# --- 📥 Load CSV & Prepare Data
+# region --- 📥 Load CSV & Prepare Data
 # -----------------------------------------------------
 @st.cache_data  # Cache to speed up repeated runs
 def load_data():
@@ -66,9 +60,10 @@ max_date = ema_df['OpenDate'].max().date()
 one_year_ago = max_date - datetime.timedelta(days=365)
 default_start_date = max(one_year_ago, min_date)  # Prevent going earlier than dataset
 
+# endregion
 
-# -----------------------------------------------------
-# --- ✨ User Input Layout with three columns
+
+# region --- ✨ User Input Layout
 # -----------------------------------------------------
 col1, col2, col3 = st.columns(3)
 
@@ -129,15 +124,16 @@ with col3:
     )
     man_long = st.number_input(
         "Long Lookback (months)",
-        value=10,
+        value=9,
         step=1,
         min_value=1,
         help="Long-term lookback period in months to stabilize entry time selection against outliers."
     )
 
+# endregion
 
-# -----------------------------------------------------
-# --- 🧮 Calculate Initial Variables (based on user input)
+
+# region --- 🧮 Calculate Initial Variables and Summary expander
 # -----------------------------------------------------
 start_date = pd.to_datetime(start_date)
 end_date = pd.to_datetime(end_date)
@@ -152,8 +148,8 @@ if pd.isnull(average_credit) or average_credit <= 0:
 
 contracts = int(equity_start * (risk / 100) / num_times / (average_credit * 100))
 
-# -----------------------------------------------------
-# --- 📋 Summary Expander BELOW user input columns
+
+# --- 📋 Summary Expander below user input columns
 # -----------------------------------------------------
 with st.expander("📋 Summary of Selections + Derived Metrics", expanded=False):
     subcol1, subcol2 = st.columns(2)
@@ -172,10 +168,10 @@ with st.expander("📋 Summary of Selections + Derived Metrics", expanded=False)
         st.markdown(f"- **Average Credit (per contract)**: `${average_credit:.2f}`")
         st.markdown(f"- **Starting Contracts per Trade**: `{contracts}`")
 
+# endregion
 
 
-# -----------------------------------------------------
-# --- 🛠️ Helper Functions
+# region --- 🛠️ Helper Functions
 # -----------------------------------------------------
 
 def calculate_performance_metrics(equity_curve, equity_column='Equity'):
@@ -472,9 +468,9 @@ def calculate_equity_curve_with_manual_lookbacks(
     return daily_equity, filtered_results
 
 
-# -----------------------------------------------------
+
 # --- 📈 Standard Figure Template to ensure charts are the same
-# -----------------------------------------------------
+
 def create_standard_fig(rows=1, cols=1, row_heights=None, vertical_spacing=0.1, height=600, theme="auto"):
     """
     Create a standard plotly figure with preset dark/light theme, margins, and sizing.
@@ -510,9 +506,9 @@ def create_standard_fig(rows=1, cols=1, row_heights=None, vertical_spacing=0.1, 
 
     return fig, is_dark  # ✅ return both the figure and the dark mode flag
 
-# -----------------------------------------------------
+
 # --- 📋 Standard Table Template
-# -----------------------------------------------------
+
 def create_standard_table(df, negative_cols=None, decimals=1, theme="auto", height=None):
     """
     Create a standard plotly Table styled to match Streamlit dark/light mode.
@@ -625,9 +621,10 @@ def create_standard_table(df, negative_cols=None, decimals=1, theme="auto", heig
 
     return fig
 
+# endregion
 
-# -----------------------------------------------------
-# --- 📊 Visualization Tabs
+
+# region --- 📊 Visualization Tabs Structure
 # -----------------------------------------------------
 tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📈 Equity Curve",
@@ -638,10 +635,10 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🔎 Lookback Optimization",
     "📖 Instructions"
 ])
+# endregion
 
 
-# -----------------------------------------------------
-# --- 📈 Tab 1: Equity Curve + Drawdown
+# region --- 📈 Tab 1: Equity Curve + Drawdown
 # -----------------------------------------------------
 
 # --- Monthly Performance Table
@@ -756,7 +753,7 @@ with tab1:
             mode='lines',
             name='Equity Curve',
             line=dict(width=2),
-            hovertemplate='$%{y:,.0f}<extra></extra>'
+            hovertemplate='%{x|%Y-%m-%d}<br>$%{y:,.0f}<extra></extra>'  # ✅ Show date and equity
         ), row=1, col=1)
 
         # --- Drawdown
@@ -768,7 +765,7 @@ with tab1:
             line=dict(width=2, color=streamlit_red),
             fill='tozeroy',
             fillcolor=streamlit_red_fill,
-            hovertemplate='%{y:.2f}%<extra></extra>'
+            hovertemplate='%{x|%Y-%m-%d}<br>%{y:.2f}%<extra></extra>'  # ✅ Show date and drawdown
         ), row=2, col=1)
 
         # --- Axis Titles
@@ -814,11 +811,10 @@ with tab1:
                 st.markdown(f"📅 **Near Lookback:** {man_near} months — {near_start.strftime('%m/%d/%Y')} to {near_end.strftime('%m/%d/%Y')}")
                 st.markdown(f"⏰ **Selected Times:** {selected_times_str}")
                 st.markdown(f"💵 **End Equity:** ${end_equity:,.2f}")
+# endregion
 
 
-
-# -----------------------------------------------------
-# --- 🎯 Tab 2: Entries Optimization
+# region --- 🎯 Tab 2: Entries Optimization
 # -----------------------------------------------------
 def optimize_num_entries_with_manual_lookbacks(
     ema_df, num_times_range, equityStart, risk, start_date, end_date, man_near, man_mid, man_long,
@@ -967,10 +963,10 @@ with tab2:
                     with col2:
                         st.plotly_chart(fig, use_container_width=True)
 
+# endregion
 
 
-# -----------------------------------------------------
-# --- 📈 Tab 3: Risk Optimization
+# region --- 📈 Tab 3: Risk Optimization
 # -----------------------------------------------------
 
 # --- 📈 Helper: Optimize Risk (with caching)
@@ -1100,10 +1096,10 @@ with tab3:
                     with col2:
                         st.plotly_chart(fig, use_container_width=True)
 
+# endregion
 
 
-# -----------------------------------------------------
-# --- 🎯 Tab 4: Entry Time PCR
+# region --- 🎯 Tab 4: Entry Time PCR
 # -----------------------------------------------------
 def create_time_pcr_table(df, selected_times=None, timezone='US/Central', is_dark=True):
 
@@ -1122,8 +1118,10 @@ def create_time_pcr_table(df, selected_times=None, timezone='US/Central', is_dar
     }.get(timezone, -1)
 
     df = df.copy()
-    df['LocalTime'] = pd.to_datetime(df['OpenTime'], format='%H:%M') + pd.to_timedelta(local_offset, unit='h')
+    df['LocalTime'] = pd.to_datetime(df['OpenTime'], format='%H:%M', errors='coerce')
+    df['LocalTime'] = df['LocalTime'] + pd.to_timedelta(local_offset, unit='h')
     df['LocalTime'] = df['LocalTime'].dt.strftime('%I:%M %p')
+
 
     # --- Selected Times Column
     if selected_times is not None:
@@ -1327,10 +1325,10 @@ with tab4:
             else:
                 st.markdown("No times selected.")
 
+# endregion
 
 
-# -----------------------------------------------------
-# --- 📈 Tab 5: Entry Time Trends
+# region --- 📈 Tab 5: Entry Time Trends
 # -----------------------------------------------------
 # --- 📈 Full Slot Equity Curve Visualization Function
 def plot_slot_equity_curves_plotly(
@@ -1421,7 +1419,7 @@ def plot_slot_equity_curves_plotly(
                 x=cumulative_pnl.index, y=cumulative_pnl[slot] * 100,
                 mode='lines', name=f'{slot} Cumulative',
                 line=dict(width=2, color="#6d6af3"),  # <<<<< Fixed color (adjust if you want)
-                hovertemplate='%{y:.2f}%<extra></extra>'
+                hovertemplate='$%{y:.0f}<extra></extra>'
             ),
             row=r, col=c
         )
@@ -1432,7 +1430,7 @@ def plot_slot_equity_curves_plotly(
                 x=rolling_avg.index, y=rolling_avg[slot] * 100,
                 mode='lines', name=f'{slot} Rolling',
                 line=dict(width=1.5, dash='dash', color='gray'),  # <<<<< Rolling line gray
-                hovertemplate='%{y:.2f}%<extra></extra>'
+                hovertemplate='$%{y:.0f}<extra></extra>'
             ),
             row=r, col=c
         )
@@ -1440,7 +1438,6 @@ def plot_slot_equity_curves_plotly(
     # --- Final Layout Settings
     fig.update_layout(
         height=400 * rows,
-        title_text="Slot Equity Trends by Time",
         showlegend=False,
         margin=dict(t=50, l=20, r=20, b=20)
     )
@@ -1481,8 +1478,11 @@ with tab5:
         columns=2,
         lookback_end=pd.to_datetime(end_date)
     )
+
+# endregion
     
 
+# region --- 🔎 Tab 6: Lookback Optimization
 # -----------------------------------------------------
 # --- 🔎 Tab 6: Lookback Optimization
 # -----------------------------------------------------
@@ -1621,10 +1621,9 @@ with tab6:
             lastDay_dt = pd.to_datetime(lastDay)
 
             rolling_windows = [
-                (lastDay_dt - relativedelta(years=2), lastDay_dt),
-                (lastDay_dt - relativedelta(months=18), lastDay_dt - relativedelta(months=6)),
-                (lastDay_dt - relativedelta(years=1), lastDay_dt),
-                (lastDay_dt - relativedelta(months=6), lastDay_dt)
+                (lastDay_dt - relativedelta(months=18), lastDay_dt),  # Last 18 months
+                (lastDay_dt - relativedelta(months=12), lastDay_dt),  # Last 12 months
+                (lastDay_dt - relativedelta(months=6), lastDay_dt)    # Last 6 months
             ]
 
             # Estimate total number of tests
@@ -1681,6 +1680,7 @@ with tab6:
                     .rename(columns={'Rank': 'Stability Score'})
                     .sort_values(by='Stability Score')
                 )
+                stability_df = stability_df.round(2) 
             else:
                 stability_df = pd.DataFrame()
 
@@ -1723,7 +1723,10 @@ with tab6:
             else:
                 st.warning("⚠️ No stable lookbacks found.")
 
+#endregion
 
+
+# region --- 📖 Tab 7: Documenation
 # -----------------------------------------------------
 # --- 📖 Tab 7: Documentation
 # -----------------------------------------------------
@@ -1736,4 +1739,6 @@ with tab7:
         st.markdown(readme_content, unsafe_allow_html=True)
     except FileNotFoundError:
         st.error("❌ README.md file not found. Please add it to your project directory.")
+
+#endregion
 
