@@ -1576,7 +1576,7 @@ with tab6:
             entry_min, entry_max = st.slider(
                 "Select Entry Range (Number of Entries per Day)", 
                 min_value=3, max_value=20, 
-                value=(9, 11)
+                value=(8, 12)
             )
 
         with col2:
