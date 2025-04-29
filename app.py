@@ -219,9 +219,13 @@ def calculate_performance_metrics(equity_curve, equity_column='Equity'):
     equity_curve['DailyReturn'] = equity_curve[equity_column].pct_change()
     downside_returns = equity_curve['DailyReturn'][equity_curve['DailyReturn'] < 0]
     downside_std = downside_returns.std()
+
     avg_return = equity_curve['DailyReturn'].mean()
     annualized_return = avg_return * 252
-    sortino_ratio = annualized_return / downside_std if downside_std != 0 else float('inf')
+
+    annualized_downside_std = downside_std * np.sqrt(252)
+
+    sortino_ratio = annualized_return / annualized_downside_std if annualized_downside_std != 0 else float('inf')
 
     return cagr, mar_ratio, sortino_ratio
 
