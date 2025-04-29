@@ -7,22 +7,28 @@ import datetime
 import pytz
 from datetime import timedelta
 import numpy as np
+import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import matplotlib.ticker as ticker
+import matplotlib.colors as mcolors
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import calendar
 import io
 from itertools import product
 from dateutil.relativedelta import relativedelta
+import time
 
 # Page config
 st.set_page_config(page_title="BYOB EMA Dashboard", layout="wide")
 
+# User Inputs
+credit_target=2.50
+
 # Title
 st.title("BYOB 5/40 EMA Backtest Dashboard")
-st.markdown("**$2.60 Target Credit, 1.5X Stops**")
+st.markdown(f"**${credit_target:.2f} Target Credit, 1.5X Stops**")
 
 
 # -----------------------------------------------------
@@ -123,7 +129,7 @@ with col3:
     )
     man_long = st.number_input(
         "Long Lookback (months)",
-        value=9,
+        value=10,
         step=1,
         min_value=1,
         help="Long-term lookback period in months to stabilize entry time selection against outliers."
@@ -691,6 +697,9 @@ def display_monthly_performance_table(equity_df, is_dark=True, equity_col='Equit
 
 with tab1:
     st.subheader(f"Equity Curve and Drawdown ({start_date.date()} to {end_date.date()})")
+    st.markdown(
+        f"##### Target Credit: ${credit_target:.2f} | Entries: {num_times} | Risk: {risk:.1f}% | Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
+    )
 
     equity_curve, full_trades = calculate_equity_curve_with_manual_lookbacks(
         ema_df=ema_df,
@@ -872,6 +881,9 @@ def run_num_entries_sweep(ema_df, start_date, end_date, equity_start, risk, man_
 # --- 🎯 Tab 2: Entries Optimization
 with tab2:
     st.subheader(f"Entries Optimization Analysis ({start_date.date()} to {end_date.date()})")
+    st.markdown(
+        f"##### Target Credit: ${credit_target:.2f} | Risk: {risk:.1f}% | Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
+    )
 
     num_times_range = range(3, 21)
 
@@ -1000,6 +1012,9 @@ def optimize_risk_for_manual_lookbacks_cached(
 # --- 📈 Tab 3: Risk Optimization
 with tab3:
     st.subheader(f"Risk Optimization Analysis ({start_date.date()} to {end_date.date()})")
+    st.markdown(
+        f"##### Target Credit: ${credit_target:.2f} | Entries: {num_times} | Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
+    )
 
     if ema_df.empty:
         st.warning("⚠️ No data available.")
@@ -1087,13 +1102,9 @@ with tab3:
 # --- 🎯 Tab 4: Entry Time PCR
 # -----------------------------------------------------
 def create_time_pcr_table(df, selected_times=None, timezone='US/Central', is_dark=True):
-    import numpy as np
-    import matplotlib.pyplot as plt
-    import matplotlib.cm as cm
-    import matplotlib.colors as mcolors
 
     # --- Dark/Light mode setup
-    cmap = cm.get_cmap('RdYlGn')
+    cmap = matplotlib.colormaps['RdYlGn']
     cell_fill = 'rgba(30,30,30,1)' if is_dark else 'rgba(245,245,245,1)'
     header_fill = 'rgba(50,50,50,1)' if is_dark else 'rgba(230,230,230,1)'
     header_font_color = 'white' if is_dark else 'black'
@@ -1106,6 +1117,7 @@ def create_time_pcr_table(df, selected_times=None, timezone='US/Central', is_dar
         'US/Pacific': -3
     }.get(timezone, -1)
 
+    df = df.copy()
     df['LocalTime'] = pd.to_datetime(df['OpenTime'], format='%H:%M') + pd.to_timedelta(local_offset, unit='h')
     df['LocalTime'] = df['LocalTime'].dt.strftime('%I:%M %p')
 
@@ -1142,12 +1154,12 @@ def create_time_pcr_table(df, selected_times=None, timezone='US/Central', is_dar
     avg_row = {}
     for col in df.columns:
         if '_Premium' in col or '_PCR' in col:
-            clean_col = df[col].replace('[\$,%,]', '', regex=True).astype(float)
+            clean_col = df[col].replace(r'[\$,%,]', '', regex=True).astype(float)
             avg_val = clean_col.mean()
             if '_Premium' in col:
                 avg_row[col] = f"${avg_val:.2f}"
             elif '_PCR' in col:
-                avg_row[col] = f"{avg_val:.2f}%"
+                avg_row[col] = f"{avg_val:.1f}%"
         else:
             avg_row[col] = 'AVG' if col == 'LocalTime' else ''
 
@@ -1157,7 +1169,7 @@ def create_time_pcr_table(df, selected_times=None, timezone='US/Central', is_dar
     cell_colors = []
     for col in df.columns:
         if '_Premium' in col or '_PCR' in col:
-            clean_col = df[col].replace('[\$,%,]', '', regex=True).astype(float)
+            clean_col = df[col].replace(r'[\$,%,]', '', regex=True).astype(float)
             if clean_col.max() == clean_col.min():
                 norm_col = np.zeros_like(clean_col)
             else:
@@ -1194,7 +1206,11 @@ def create_time_pcr_table(df, selected_times=None, timezone='US/Central', is_dar
         )
     )])
 
-    fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=800)
+    fig.update_layout(
+        margin=dict(l=0, r=0, t=10, b=0),
+        height=800
+    )
+
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -1566,19 +1582,19 @@ with tab6:
         with col2:
             near_min, near_max = st.slider(
                 "Near Lookback Range (Months)", 
-                min_value=1, max_value=6, 
+                min_value=1, max_value=12, 
                 value=(2, 5)
             )
 
             mid_min, mid_max = st.slider(
                 "Mid Lookback Range (Months)", 
-                min_value=3, max_value=10, 
+                min_value=1, max_value=12, 
                 value=(5, 9)
             )
 
             long_min, long_max = st.slider(
                 "Long Lookback Range (Months)", 
-                min_value=6, max_value=12, 
+                min_value=1, max_value=12, 
                 value=(9, 12)
             )
 
@@ -1586,70 +1602,122 @@ with tab6:
 
         # --- Button to run
         if st.button("🚀 Run Stability Test"):
-            with st.spinner("🔎 Running stability optimization... this might take a while!"):
-                
-                # --- Build ranges from user input
-                entry_range = range(entry_min, entry_max + 1)
-                near_range = range(near_min, near_max + 1)
-                mid_range = range(mid_min, mid_max + 1)
-                long_range = range(long_min, long_max + 1)
+            start_time = time.time()  # ⏱ Start timer
 
-                # --- Prepare rolling windows
-                lastDay_dt = pd.to_datetime(lastDay)
+            # Progress bar setup
+            progress_bar = st.progress(0, text="🔎 Running stability optimization...")
 
-                rolling_windows = [
-                    (lastDay_dt - relativedelta(years=2), lastDay_dt),
-                    (lastDay_dt - relativedelta(months=18), lastDay_dt - relativedelta(months=6)),
-                    (lastDay_dt - relativedelta(years=1), lastDay_dt),
-                    (lastDay_dt - relativedelta(months=6), lastDay_dt)
-                ]
+            # Build ranges
+            entry_range = range(entry_min, entry_max + 1)
+            near_range = range(near_min, near_max + 1)
+            mid_range = range(mid_min, mid_max + 1)
+            long_range = range(long_min, long_max + 1)
 
-                # --- Run optimization
-                stability_df = test_lookback_stability_with_overlap_cached(
-                    ema_df=ema_df,
-                    entry_range=entry_range,
-                    risk=risk,
-                    equityStart=equity_start,
-                    near_range=near_range,
-                    mid_range=mid_range,
-                    long_range=long_range,
-                    rolling_windows=[(start.strftime('%Y-%m-%d'), end.strftime('%Y-%m-%d')) for start, end in rolling_windows]
+            # Prepare rolling windows
+            lastDay_dt = pd.to_datetime(lastDay)
+
+            rolling_windows = [
+                (lastDay_dt - relativedelta(years=2), lastDay_dt),
+                (lastDay_dt - relativedelta(months=18), lastDay_dt - relativedelta(months=6)),
+                (lastDay_dt - relativedelta(years=1), lastDay_dt),
+                (lastDay_dt - relativedelta(months=6), lastDay_dt)
+            ]
+
+            # Estimate total number of tests
+            lookback_combinations = [
+                (near, mid, long)
+                for near, mid, long in product(near_range, mid_range, long_range)
+                if near <= mid <= long
+            ]
+            total_tests = len(entry_range) * len(rolling_windows) * len(lookback_combinations)
+
+            completed_tests = 0
+
+            # --- Manual loop version to allow updating progress
+            results = []
+            for num_times in entry_range:
+                for start_date, end_date in rolling_windows:
+                    for man_near, man_mid, man_long in lookback_combinations:
+                        daily_equity, _ = calculate_equity_curve_with_manual_lookbacks(
+                            ema_df=ema_df,
+                            start_date=start_date,
+                            end_date=end_date,
+                            equityStart=equity_start,
+                            risk=risk,
+                            num_times=num_times,
+                            man_near=man_near,
+                            man_mid=man_mid,
+                            man_long=man_long
+                        )
+
+                        if not daily_equity.empty:
+                            cagr, _, _ = calculate_performance_metrics(daily_equity)
+                            results.append({
+                                'Near': man_near,
+                                'Mid': man_mid,
+                                'Long': man_long,
+                                'NumEntries': num_times,
+                                'CAGR': cagr,
+                                'Start': start_date,
+                                'End': end_date
+                            })
+
+                        completed_tests += 1
+                        progress_bar.progress(completed_tests / total_tests, text=f"🔎 Running stability optimization... {completed_tests}/{total_tests}")
+
+            results_df = pd.DataFrame(results)
+
+            if not results_df.empty:
+                results_df['Rank'] = results_df.groupby(['Start', 'End', 'NumEntries'])['CAGR'].rank(ascending=False, method="dense")
+
+                stability_df = (
+                    results_df.groupby(['Near', 'Mid', 'Long'])['Rank']
+                    .mean()
+                    .reset_index()
+                    .rename(columns={'Rank': 'Stability Score'})
+                    .sort_values(by='Stability Score')
+                )
+            else:
+                stability_df = pd.DataFrame()
+
+            # --- Final success block
+            end_time = time.time()
+            elapsed_seconds = int(end_time - start_time)
+            minutes, seconds = divmod(elapsed_seconds, 60)
+
+            if not stability_df.empty:
+                st.success(f"✅ Stability test completed! ({completed_tests:,} combinations tested in {minutes}m {seconds}s)")
+
+                # --- Create Plotly Table
+                fig = go.Figure(data=[go.Table(
+                    header=dict(
+                        values=list(stability_df.head(10).columns),
+                        align='center',
+                        font=dict(size=14, color='white'),
+                        fill_color='rgba(50,50,50,1)',
+                        height=30
+                    ),
+                    cells=dict(
+                        values=[stability_df.head(10)[col] for col in stability_df.head(10).columns],
+                        align='center',
+                        font=dict(size=14),
+                        fill_color='rgba(0,0,0,0)',
+                        height=28
+                    )
+                )])
+
+                fig.update_layout(
+                    margin=dict(l=20, r=20, t=30, b=20),
+                    height=400
                 )
 
-                if stability_df.empty:
-                    st.warning("⚠️ No stable lookbacks found.")
-                else:
-                    num_tests = len(stability_df)
-                    st.success(f"✅ Stability test completed! ({num_tests:,} combinations tested)")
+                # --- Create three columns: empty, table, empty
+                col1, col2, col3 = st.columns([1, 2, 1])
 
-                    # --- Create Plotly Table
-                    fig = go.Figure(data=[go.Table(
-                        header=dict(
-                            values=list(stability_df.head(10).columns),
-                            align='center',
-                            font=dict(size=14, color='white'),
-                            fill_color='rgba(50,50,50,1)',
-                            height=30
-                        ),
-                        cells=dict(
-                            values=[stability_df.head(10)[col] for col in stability_df.head(10).columns],
-                            align='center',
-                            font=dict(size=14),
-                            fill_color='rgba(0,0,0,0)',
-                            height=28
-                        )
-                    )])
-
-                    fig.update_layout(
-                        margin=dict(l=20, r=20, t=30, b=20),
-                        height=400
-                    )
-
-                    # --- Create three columns: empty, table, empty
-                    col1, col2, col3 = st.columns([1, 2, 1])
-
-                    with col2:
-                        st.plotly_chart(fig, use_container_width=True)  # ✅ Middle column only
+                with col2:
+                    st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("⚠️ No stable lookbacks found.")
 
 
 # -----------------------------------------------------

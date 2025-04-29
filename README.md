@@ -51,7 +51,8 @@ Welcome to the BYOB EMA Trading Dashboard — a private research tool designed t
 
 - **Updating Data**  
   - Overwrite the existing `EMA.csv` with the latest monthly data.
-  - Re-run the app to reflect the updated trades.
+  - Data comes from [Trade Automation Toolbox](https://tradeautomationtoolbox.com/byob-ticks/?save=GkxAZ8D)
+  - Re-run the app to reflect the updated data.
 
 - **Stability Testing**  
   - Only re-run the Lookback Stability tab at the start of a new month.
