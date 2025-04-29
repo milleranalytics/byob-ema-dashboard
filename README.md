@@ -30,6 +30,10 @@ Welcome to the BYOB EMA Trading Dashboard — a private research tool designed t
    - **Tab 6: Lookback Stability Optimization** — (Optional) Re-optimize best lookback periods each month to maintain robustness.
 
 ---
+## 📜 Strategy Philosophy
+
+The BYOB EMA Dashboard is designed to help guide systematic monthly trading decisions without relying on lookahead bias or overfitting. Rather than optimizing for the highest possible backtest result, the workflow emphasizes *stability* across different entry counts, lookback periods, and time windows. Credit targets are reviewed monthly to stay responsive to changing market dynamics. Entry times are carefully balanced between diversification and maintaining an edge. Lookbacks are selected through rigorous multi-window stability testing. The goal is to create a durable, walk-forward research framework that favors robust consistency over fragile perfection — building confidence that results will generalize into live trading conditions.
+
 
 ## 📊 Key Assumptions
 
