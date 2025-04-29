@@ -107,7 +107,7 @@ with col2:
         "Number of Entries",
         min_value=2,
         max_value=20,
-        value=10,
+        value=12,
         help="Number of entry times selected each day."
     )
 
@@ -155,7 +155,7 @@ contracts = int(equity_start * (risk / 100) / num_times / (average_credit * 100)
 # -----------------------------------------------------
 # --- 📋 Summary Expander BELOW user input columns
 # -----------------------------------------------------
-with st.expander("📋 Summary of Selections + Derived Metrics", expanded=True):
+with st.expander("📋 Summary of Selections + Derived Metrics", expanded=False):
     subcol1, subcol2 = st.columns(2)
 
     with subcol1:
