@@ -1,0 +1,9 @@
+{
+  "man_near": 2,
+  "man_mid": 5,
+  "man_long": 9,
+  "num_times": 12,
+  "risk": 4.0,
+  "equity_start": 400000,
+  "credit_target": 2.5
+}

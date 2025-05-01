@@ -12,6 +12,21 @@ import calendar
 from itertools import product
 from dateutil.relativedelta import relativedelta
 import time
+import json
+from pathlib import Path
+
+# Declare defautls
+DEFAULTS_PATH = Path("defaults.json")
+
+def load_defaults():
+    if DEFAULTS_PATH.exists():
+        with open(DEFAULTS_PATH, "r") as f:
+            return json.load(f)
+    return {}
+
+def save_defaults(defaults):
+    with open(DEFAULTS_PATH, "w") as f:
+        json.dump(defaults, f, indent=2)
 
 # Page config
 st.set_page_config(page_title="BYOB EMA Dashboard", layout="wide")
@@ -19,7 +34,17 @@ st.set_page_config(page_title="BYOB EMA Dashboard", layout="wide")
 # endregion
 
 # User Inputs
-credit_target=2.50
+defaults = load_defaults()
+
+# Define variables from defaults so they're in scope
+man_near = defaults.get("man_near", 2)
+man_mid = defaults.get("man_mid", 5)
+man_long = defaults.get("man_long", 10)
+num_times = defaults.get("num_times", 12)
+risk = defaults.get("risk", 4.0)
+equity_start = defaults.get("equity_start", 400_000)
+credit_target = defaults.get("credit_target", 2.5)
+
 
 # Title
 st.title("BYOB EMA Dashboard")
@@ -88,13 +113,13 @@ with col1:
 with col2:
     equity_start = st.number_input(
         "Starting Equity ($)",
-        value=400_000,
+        value=equity_start,
         step=10_000,
-        help="Your starting account size in dollars. Used to size trades relative to risk. Higher levels mitigate impacts from jumping up number of contracts as you scale."
-    )
+        help="Your starting account size..."
+    )   
     risk = st.number_input(
         "Risk per Day (%)",
-        value=4.0,
+        value=risk,
         step=0.1,
         help="The maximum % of your equity you are willing to risk on a single day. Example: 4% of $400,000 = $16,000 max daily risk.  'Risk' is equal to target credit received for the day assuming -100% PCR is about as bad as it gets, hence 'Risk'."
     )
@@ -102,7 +127,7 @@ with col2:
         "Number of Entries",
         min_value=2,
         max_value=20,
-        value=12,
+        value=num_times,
         help="Number of entry times selected each day."
     )
 
@@ -110,25 +135,26 @@ with col2:
 with col3:
     man_near = st.number_input(
         "Near Lookback (months)",
-        value=2,
+        value=man_near,
         step=1,
         min_value=1,
         help="Short-term lookback period in months used to find best entry times. Emphasizes recent market behavior."
     )
     man_mid = st.number_input(
         "Mid Lookback (months)",
-        value=5,
+        value=man_mid,
         step=1,
         min_value=1,
         help="Medium-term lookback period in months to smooth entry time selection."
     )
     man_long = st.number_input(
         "Long Lookback (months)",
-        value=9,
+        value=man_long,
         step=1,
         min_value=1,
         help="Long-term lookback period in months to stabilize entry time selection against outliers."
     )
+
 
 # endregion
 
@@ -151,7 +177,22 @@ contracts = int(equity_start * (risk / 100) / num_times / (average_credit * 100)
 
 # --- 📋 Summary Expander below user input columns
 # -----------------------------------------------------
-with st.expander("📋 Summary of Selections + Derived Metrics", expanded=False):
+with st.expander("📋 Summary of Selections, Derived Metrics & Save Defaults", expanded=False):
+
+        # 💾 Save button goes here
+    if st.button("💾 Save These Settings as Default"):
+        new_defaults = {
+            "man_near": man_near,
+            "man_mid": man_mid,
+            "man_long": man_long,
+            "num_times": num_times,
+            "risk": risk,
+            "equity_start": equity_start,
+            "credit_target": credit_target
+        }
+        save_defaults(new_defaults)
+        st.success("✅ Defaults saved! Restart the app to load them.")
+
     subcol1, subcol2 = st.columns(2)
 
     with subcol1:
@@ -167,6 +208,7 @@ with st.expander("📋 Summary of Selections + Derived Metrics", expanded=False)
         st.markdown(f"- **Number of Entries**: `{num_times}`")
         st.markdown(f"- **Average Credit (per contract)**: `${average_credit:.2f}`")
         st.markdown(f"- **Starting Contracts per Trade**: `{contracts}`")
+
 
 # endregion
 
@@ -702,115 +744,97 @@ with tab1:
         f"##### Target Credit: ${credit_target:.2f} | Entries: {num_times} | Risk: {risk:.1f}% | Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
     )
 
-    equity_curve, full_trades = calculate_equity_curve_with_manual_lookbacks(
-        ema_df=ema_df,
-        start_date=start_date,
-        end_date=end_date,
-        equityStart=equity_start,
-        risk=risk,
-        num_times=num_times,
-        man_near=man_near,
-        man_mid=man_mid,
-        man_long=man_long
-    )
+    # Reserve container for all UI output
+    equity_container = st.empty()
 
-    if equity_curve.empty:
-        st.warning("⚠️ No trades generated for the selected period and parameters.")
-    else:
-        equity_curve_with_dd, max_drawdown = calculate_drawdown(equity_curve)
-        pcr = calculate_pcr(full_trades)
-        cagr, mar_ratio, sortino = calculate_performance_metrics(equity_curve_with_dd)
+    # Spinner gives grayed-out feedback while calculations are running
+    with equity_container.container():
+        with st.spinner("🔄 Calculating equity curve and performance metrics..."):
+            equity_curve, full_trades = calculate_equity_curve_with_manual_lookbacks(
+                ema_df=ema_df,
+                start_date=start_date,
+                end_date=end_date,
+                equityStart=equity_start,
+                risk=risk,
+                num_times=num_times,
+                man_near=man_near,
+                man_mid=man_mid,
+                man_long=man_long
+            )
 
-        # --- 📈 Top Metrics Display
-        metrics_col1, metrics_col2, metrics_col3, metrics_col4, metrics_col5 = st.columns([1,1,1,1,1])
+            if equity_curve.empty:
+                st.warning("⚠️ No trades generated for the selected period and parameters.")
+            else:
+                equity_curve_with_dd, max_drawdown = calculate_drawdown(equity_curve)
+                pcr = calculate_pcr(full_trades)
+                cagr, mar_ratio, sortino = calculate_performance_metrics(equity_curve_with_dd)
 
-        with metrics_col1:
-            st.metric(label="CAGR", value=f"{cagr:.2%}")
+                # --- 📈 Top Metrics Display
+                col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
+                col1.metric("CAGR", f"{cagr:.2%}")
+                col2.metric("MAR Ratio", f"{mar_ratio:.2f}")
+                col3.metric("Sortino Ratio", f"{sortino:.2f}")
+                col4.metric("Max Drawdown", f"{max_drawdown:.2f}%")
+                col5.metric("PCR", f"{pcr:.2f}%")
 
-        with metrics_col2:
-            st.metric(label="MAR Ratio", value=f"{mar_ratio:.2f}")
+                # --- 📈 Chart
+                fig, is_dark = create_standard_fig(rows=2, cols=1, row_heights=[0.6, 0.4], height=800)
+                streamlit_red = 'rgba(234,92,81,1)'
+                streamlit_red_fill = 'rgba(234,92,81,0.15)'
 
-        with metrics_col3:
-            st.metric(label="Sortino Ratio", value=f"{sortino:.2f}")
+                fig.add_trace(go.Scatter(
+                    x=equity_curve_with_dd['Date'],
+                    y=equity_curve_with_dd['Equity'],
+                    mode='lines',
+                    name='Equity Curve',
+                    line=dict(width=2),
+                    hovertemplate='%{x|%Y-%m-%d}<br>$%{y:,.0f}<extra></extra>'
+                ), row=1, col=1)
 
-        with metrics_col4:
-            st.metric(label="Max Drawdown", value=f"{max_drawdown:.2f}%")
+                fig.add_trace(go.Scatter(
+                    x=equity_curve_with_dd['Date'],
+                    y=equity_curve_with_dd['Drawdown'],
+                    mode='lines',
+                    name='Drawdown (%)',
+                    line=dict(width=2, color=streamlit_red),
+                    fill='tozeroy',
+                    fillcolor=streamlit_red_fill,
+                    hovertemplate='%{x|%Y-%m-%d}<br>%{y:.2f}%<extra></extra>'
+                ), row=2, col=1)
 
-        with metrics_col5:
-            st.metric(label="PCR", value=f"{pcr:.2f}%")
+                fig.update_yaxes(title_text="Equity ($)", type="log", row=1, col=1)
+                fig.update_yaxes(title_text="Drawdown (%)", row=2, col=1)
 
-        # --- 📈 Create Standard Plot ---
-        fig, is_dark = create_standard_fig(rows=2, cols=1, row_heights=[0.6, 0.4], height=800)
+                st.plotly_chart(fig, use_container_width=True)
 
-        # --- Colors
-        streamlit_red = 'rgba(234,92,81,1)'
-        streamlit_red_fill = 'rgba(234,92,81,0.15)'
+                # --- 📅 Monthly Performance Table
+                st.subheader("Monthly Performance Table")
+                display_monthly_performance_table(equity_curve_with_dd, is_dark=True)
 
-        # --- Equity Curve
-        fig.add_trace(go.Scatter(
-            x=equity_curve_with_dd['Date'],
-            y=equity_curve_with_dd['Equity'],
-            mode='lines',
-            name='Equity Curve',
-            line=dict(width=2),
-            hovertemplate='%{x|%Y-%m-%d}<br>$%{y:,.0f}<extra></extra>'  # ✅ Show date and equity
-        ), row=1, col=1)
+                # --- 📅 Monthly Summary
+                with st.expander("📅 Monthly Trading Summary"):
+                    monthly_summary = full_trades.groupby(full_trades['Date'].dt.to_period('M'))
 
-        # --- Drawdown
-        fig.add_trace(go.Scatter(
-            x=equity_curve_with_dd['Date'],
-            y=equity_curve_with_dd['Drawdown'],
-            mode='lines',
-            name='Drawdown (%)',
-            line=dict(width=2, color=streamlit_red),
-            fill='tozeroy',
-            fillcolor=streamlit_red_fill,
-            hovertemplate='%{x|%Y-%m-%d}<br>%{y:.2f}%<extra></extra>'  # ✅ Show date and drawdown
-        ), row=2, col=1)
+                    for month_period, month_trades in monthly_summary:
+                        st.markdown(f"##### {month_period.strftime('%Y-%m')}")
 
-        # --- Axis Titles
-        fig.update_yaxes(title_text="Equity ($)", type="log", row=1, col=1)
-        fig.update_yaxes(title_text="Drawdown (%)", row=2, col=1)
+                        selected_times = sorted(month_trades['OpenTime'].unique())
+                        selected_times_str = ', '.join(selected_times) if selected_times else "No trades"
+                        end_equity = month_trades['Equity'].iloc[-1]
 
-        # --- Show
-        st.plotly_chart(fig, use_container_width=True)
+                        far_start = month_trades['LongLookbackStart'].min()
+                        far_end = month_trades['LongLookbackEnd'].max()
+                        mid_start = month_trades['MidLookbackStart'].min()
+                        mid_end = month_trades['MidLookbackEnd'].max()
+                        near_start = month_trades['NearLookbackStart'].min()
+                        near_end = month_trades['NearLookbackEnd'].max()
 
-        # --- 📅 Monthly Performance Table ---
-        st.subheader("Monthly Performance Table")
+                        st.markdown(f"📅 **Far Lookback:** {man_long} months — {far_start.strftime('%m/%d/%Y')} to {far_end.strftime('%m/%d/%Y')}")
+                        st.markdown(f"📅 **Mid Lookback:** {man_mid} months — {mid_start.strftime('%m/%d/%Y')} to {mid_end.strftime('%m/%d/%Y')}")
+                        st.markdown(f"📅 **Near Lookback:** {man_near} months — {near_start.strftime('%m/%d/%Y')} to {near_end.strftime('%m/%d/%Y')}")
+                        st.markdown(f"⏰ **Selected Times:** {selected_times_str}")
+                        st.markdown(f"💵 **End Equity:** ${end_equity:,.2f}")
 
-        if equity_curve.empty:
-            st.warning("⚠️ No data available to generate monthly performance.")
-        else:
-            display_monthly_performance_table(equity_curve_with_dd, is_dark=True)
-
-        # --- 📅 Expandable Monthly Summary ---
-        with st.expander("📅 Monthly Trading Summary"):
-            monthly_summary = full_trades.groupby(full_trades['Date'].dt.to_period('M'))
-
-            for month_period, month_trades in monthly_summary:
-                st.markdown(f"##### {month_period.strftime('%Y-%m')}")
-
-                # --- Selected Times
-                selected_times = sorted(month_trades['OpenTime'].unique())
-                selected_times_str = ', '.join(selected_times) if selected_times else "No trades"
-
-                # --- End Equity (last trade of month)
-                end_equity = month_trades['Equity'].iloc[-1]
-
-                # --- Lookback Ranges
-                far_start = month_trades['LongLookbackStart'].min()
-                far_end = month_trades['LongLookbackEnd'].max()
-                mid_start = month_trades['MidLookbackStart'].min()
-                mid_end = month_trades['MidLookbackEnd'].max()
-                near_start = month_trades['NearLookbackStart'].min()
-                near_end = month_trades['NearLookbackEnd'].max()
-
-                # --- Show Details
-                st.markdown(f"📅 **Far Lookback:** {man_long} months — {far_start.strftime('%m/%d/%Y')} to {far_end.strftime('%m/%d/%Y')}")
-                st.markdown(f"📅 **Mid Lookback:** {man_mid} months — {mid_start.strftime('%m/%d/%Y')} to {mid_end.strftime('%m/%d/%Y')}")
-                st.markdown(f"📅 **Near Lookback:** {man_near} months — {near_start.strftime('%m/%d/%Y')} to {near_end.strftime('%m/%d/%Y')}")
-                st.markdown(f"⏰ **Selected Times:** {selected_times_str}")
-                st.markdown(f"💵 **End Equity:** ${end_equity:,.2f}")
 # endregion
 
 
@@ -823,43 +847,41 @@ def optimize_num_entries_with_manual_lookbacks(
     """
     Optimize number of entries for manual lookbacks, returning CAGR, MAR, Sortino, and Max Drawdown.
     """
-
     results = []
 
-    # Streamlit loading spinner
-    with st.spinner("🔄 Optimizing number of entries..."):
-        for num_times in num_times_range:
-            daily_equity_manual, _ = calculate_equity_curve_with_manual_lookbacks(
-                ema_df=ema_df,
-                start_date=start_date,
-                end_date=end_date,
-                equityStart=equityStart,
-                risk=risk,
-                num_times=num_times,
-                man_near=man_near,
-                man_mid=man_mid,
-                man_long=man_long
-            )
+    for num_times in num_times_range:
+        daily_equity_manual, _ = calculate_equity_curve_with_manual_lookbacks(
+            ema_df=ema_df,
+            start_date=start_date,
+            end_date=end_date,
+            equityStart=equityStart,
+            risk=risk,
+            num_times=num_times,
+            man_near=man_near,
+            man_mid=man_mid,
+            man_long=man_long
+        )
 
-            if daily_equity_manual.empty:
-                continue
+        if daily_equity_manual.empty:
+            continue
 
-            cagr, mar, sortino = performance_func(daily_equity_manual)
-            _, max_drawdown = calculate_drawdown(daily_equity_manual)
+        cagr, mar, sortino = performance_func(daily_equity_manual)
+        _, max_drawdown = calculate_drawdown(daily_equity_manual)
 
-            results.append({
-                'NumEntries': num_times,
-                'CAGR': cagr,
-                'MAR': mar,
-                'Sortino': sortino,
-                'MaxDrawdown': max_drawdown
-            })
+        results.append({
+            'NumEntries': num_times,
+            'CAGR': cagr,
+            'MAR': mar,
+            'Sortino': sortino,
+            'MaxDrawdown': max_drawdown
+        })
 
     if not results:
         st.error("❌ No valid results found for the provided num_times range.")
         return pd.DataFrame()
 
     return pd.DataFrame(results)
+
 
 # --- 📈 Cached Optimization Sweep
 @st.cache_data(show_spinner=False)
@@ -887,81 +909,85 @@ with tab2:
 
     num_times_range = range(3, 21)
 
+    # Reserve UI space early
+    optimization_container = st.empty()
+
+    # Define columns up front so layout doesn't flicker
+    col1, col2 = st.columns(2)
+
     if ema_df.empty:
-        st.warning("⚠️ No data available.")
+        with optimization_container.container():
+            st.warning("⚠️ No data available.")
     else:
-        # ✅ Cached sweep function
-        optimization_results = run_num_entries_sweep(
-            ema_df=ema_df,
-            start_date=start_date,
-            end_date=end_date,
-            equity_start=equity_start,
-            risk=risk,
-            man_near=man_near,
-            man_mid=man_mid,
-            man_long=man_long
-        )
-
-        if optimization_results.empty:
-            st.warning("⚠️ No valid optimization results.")
-        else:
-            # --- 📈 Split into two columns
-            col1, col2 = st.columns(2)
-
-            # --- Metrics to plot
-            metrics_to_plot = [
-                ("CAGR", "CAGR", None),
-                ("MAR Ratio", "MAR", "#2ca02c"),
-                ("Sortino Ratio", "Sortino", "#9467bd"),
-                ("Max Drawdown (%)", "MaxDrawdown", "rgba(234,92,81,1)")
-            ]
-
-            for idx, (metric_title, metric_column, color) in enumerate(metrics_to_plot):
-                # 🆕 Use standard figure template
-                fig, is_dark = create_standard_fig(height=400)
-
-                fig.add_trace(go.Scatter(
-                    x=optimization_results['NumEntries'],
-                    y=optimization_results[metric_column],
-                    mode='lines+markers',
-                    marker=dict(size=6),
-                    line=dict(width=2) if color is None else dict(width=2, color=color),
-                    name=metric_title,
-                ))
-
-                fig.add_vline(
-                    x=num_times,
-                    line_dash="dash",
-                    line_color="rgba(234,234,234,0.4)",
-                    line_width=1,
-                    opacity=0.8
+        # Run calculation inside the container and spinner
+        with optimization_container.container():
+            with st.spinner("🔄 Optimizing number of entries..."):
+                optimization_results = run_num_entries_sweep(
+                    ema_df=ema_df,
+                    start_date=start_date,
+                    end_date=end_date,
+                    equity_start=equity_start,
+                    risk=risk,
+                    man_near=man_near,
+                    man_mid=man_mid,
+                    man_long=man_long
                 )
 
-                # 🧠 Only format CAGR y-axis as %  
-                if metric_column == "CAGR":
-                    yaxis_tickformat = ".0%"
-                    hovertemplate = '%{y:.2%}<extra></extra>'
+                if optimization_results.empty:
+                    st.warning("⚠️ No valid optimization results.")
                 else:
-                    yaxis_tickformat = None
-                    hovertemplate = '%{y:.2f}<extra></extra>'
+                    metrics_to_plot = [
+                        ("CAGR", "CAGR", None),
+                        ("MAR Ratio", "MAR", "#2ca02c"),
+                        ("Sortino Ratio", "Sortino", "#9467bd"),
+                        ("Max Drawdown (%)", "MaxDrawdown", "rgba(234,92,81,1)")
+                    ]
 
-                fig.data[0].hovertemplate = hovertemplate
+                    for idx, (metric_title, metric_column, color) in enumerate(metrics_to_plot):
+                        fig, is_dark = create_standard_fig(height=400)
 
-                fig.update_layout(
-                    title=metric_title,
-                    xaxis_title="Number of Entries",
-                    yaxis_title=metric_title,
-                    xaxis=dict(tickmode='linear', dtick=1),
-                    yaxis_tickformat=yaxis_tickformat,
-                )
+                        fig.add_trace(go.Scatter(
+                            x=optimization_results['NumEntries'],
+                            y=optimization_results[metric_column],
+                            mode='lines+markers',
+                            marker=dict(size=6),
+                            line=dict(width=2) if color is None else dict(width=2, color=color),
+                            name=metric_title,
+                        ))
 
-                # --- 📈 Alternate between columns
-                if idx % 2 == 0:
-                    with col1:
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    with col2:
-                        st.plotly_chart(fig, use_container_width=True)
+                        fig.add_vline(
+                            x=num_times,
+                            line_dash="dash",
+                            line_color="rgba(234,234,234,0.4)",
+                            line_width=1,
+                            opacity=0.8
+                        )
+
+                        if metric_column == "CAGR":
+                            yaxis_tickformat = ".0%"
+                            hovertemplate = '%{y:.2%}<extra></extra>'
+                        else:
+                            yaxis_tickformat = None
+                            hovertemplate = '%{y:.2f}<extra></extra>'
+
+                        fig.data[0].hovertemplate = hovertemplate
+
+                        fig.update_layout(
+                            title=metric_title,
+                            xaxis_title="Number of Entries",
+                            yaxis_title=metric_title,
+                            xaxis=dict(tickmode='linear', dtick=1),
+                            yaxis_tickformat=yaxis_tickformat,
+                        )
+
+                        # Alternate columns
+                        if idx % 2 == 0:
+                            with col1:
+                                st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            with col2:
+                                st.plotly_chart(fig, use_container_width=True)
+
 
 # endregion
 
@@ -970,7 +996,7 @@ with tab2:
 # -----------------------------------------------------
 
 # --- 📈 Helper: Optimize Risk (with caching)
-@st.cache_data(show_spinner=True)
+@st.cache_data(show_spinner=False)
 def optimize_risk_for_manual_lookbacks_cached(
     ema_df, num_times, risk_range, step_size, start_date, end_date, equityStart, man_near, man_mid, man_long
 ):
@@ -1016,85 +1042,85 @@ with tab3:
         f"##### Target Credit: ${credit_target:.2f} | Entries: {num_times} | Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
     )
 
+    risk_container = st.empty()
+    col1, col2 = st.columns(2)  # Reserve layout ahead of time
+
     if ema_df.empty:
-        st.warning("⚠️ No data available.")
+        with risk_container.container():
+            st.warning("⚠️ No data available.")
     else:
-        risk_range = (0.8, 6.0)  # ✅ Default risk range (0.8% to 6%)
-        step_size = 0.2
+        with risk_container.container():
+            with st.spinner("🔄 Optimizing risk levels..."):
+                risk_range = (0.8, 6.0)
+                step_size = 0.2
 
-        optimization_results_risk = optimize_risk_for_manual_lookbacks_cached(
-            ema_df=ema_df,
-            num_times=num_times,
-            risk_range=risk_range,
-            step_size=step_size,
-            start_date=start_date,
-            end_date=end_date,
-            equityStart=equity_start,
-            man_near=man_near,
-            man_mid=man_mid,
-            man_long=man_long
-        )
-
-        if optimization_results_risk.empty:
-            st.warning("⚠️ No valid optimization results.")
-        else:
-            # --- 📈 Create two columns for the plots
-            col1, col2 = st.columns(2)
-
-            # --- 📈 Metrics to Plot
-            metrics_to_plot = [
-                ("CAGR", "CAGR", None),
-                ("MAR Ratio", "MAR", "#2ca02c"),
-                ("Sortino Ratio", "Sortino", "#9467bd"),
-                ("Max Drawdown (%)", "MaxDrawdown", "rgba(234,92,81,1)")
-            ]
-
-            for idx, (metric_title, metric_column, color) in enumerate(metrics_to_plot):
-                # 🆕 Use standard figure template
-                fig, is_dark = create_standard_fig(height=400)
-
-                fig.add_trace(go.Scatter(
-                    x=optimization_results_risk['Risk'],
-                    y=optimization_results_risk[metric_column],
-                    mode='lines+markers',
-                    marker=dict(size=6),
-                    line=dict(width=2) if color is None else dict(width=2, color=color),
-                    name=metric_title,
-                ))
-
-                fig.add_vline(
-                    x=risk,
-                    line_dash="dash",
-                    line_color="rgba(234,234,234,0.4)",
-                    line_width=1,
-                    opacity=0.8
+                optimization_results_risk = optimize_risk_for_manual_lookbacks_cached(
+                    ema_df=ema_df,
+                    num_times=num_times,
+                    risk_range=risk_range,
+                    step_size=step_size,
+                    start_date=start_date,
+                    end_date=end_date,
+                    equityStart=equity_start,
+                    man_near=man_near,
+                    man_mid=man_mid,
+                    man_long=man_long
                 )
 
-                # 🧠 Only format CAGR y-axis as %  
-                if metric_column == "CAGR":
-                    yaxis_tickformat = ".0%"
-                    hovertemplate = '%{y:.2%}<extra></extra>'
+                if optimization_results_risk.empty:
+                    st.warning("⚠️ No valid optimization results.")
                 else:
-                    yaxis_tickformat = None
-                    hovertemplate = '%{y:.2f}<extra></extra>'
+                    metrics_to_plot = [
+                        ("CAGR", "CAGR", None),
+                        ("MAR Ratio", "MAR", "#2ca02c"),
+                        ("Sortino Ratio", "Sortino", "#9467bd"),
+                        ("Max Drawdown (%)", "MaxDrawdown", "rgba(234,92,81,1)")
+                    ]
 
-                fig.data[0].hovertemplate = hovertemplate
+                    for idx, (metric_title, metric_column, color) in enumerate(metrics_to_plot):
+                        fig, is_dark = create_standard_fig(height=400)
 
-                fig.update_layout(
-                    title=metric_title,
-                    xaxis_title="Risk (%)",
-                    yaxis_title=metric_title,
-                    xaxis=dict(tickmode='linear'),
-                    yaxis_tickformat=yaxis_tickformat,
-                )
+                        fig.add_trace(go.Scatter(
+                            x=optimization_results_risk['Risk'],
+                            y=optimization_results_risk[metric_column],
+                            mode='lines+markers',
+                            marker=dict(size=6),
+                            line=dict(width=2) if color is None else dict(width=2, color=color),
+                            name=metric_title,
+                        ))
 
-                # --- 📈 Alternate between columns
-                if idx % 2 == 0:
-                    with col1:
-                        st.plotly_chart(fig, use_container_width=True)
-                else:
-                    with col2:
-                        st.plotly_chart(fig, use_container_width=True)
+                        fig.add_vline(
+                            x=risk,
+                            line_dash="dash",
+                            line_color="rgba(234,234,234,0.4)",
+                            line_width=1,
+                            opacity=0.8
+                        )
+
+                        if metric_column == "CAGR":
+                            yaxis_tickformat = ".0%"
+                            hovertemplate = '%{y:.2%}<extra></extra>'
+                        else:
+                            yaxis_tickformat = None
+                            hovertemplate = '%{y:.2f}<extra></extra>'
+
+                        fig.data[0].hovertemplate = hovertemplate
+
+                        fig.update_layout(
+                            title=metric_title,
+                            xaxis_title="Risk (%)",
+                            yaxis_title=metric_title,
+                            xaxis=dict(tickmode='linear'),
+                            yaxis_tickformat=yaxis_tickformat,
+                        )
+
+                        if idx % 2 == 0:
+                            with col1:
+                                st.plotly_chart(fig, use_container_width=True)
+                        else:
+                            with col2:
+                                st.plotly_chart(fig, use_container_width=True)
+
 
 # endregion
 
@@ -1419,7 +1445,7 @@ def plot_slot_equity_curves_plotly(
                 x=cumulative_pnl.index, y=cumulative_pnl[slot] * 100,
                 mode='lines', name=f'{slot} Cumulative',
                 line=dict(width=2, color="#6d6af3"),  # <<<<< Fixed color (adjust if you want)
-                hovertemplate='$%{y:.0f}<extra></extra>'
+                hovertemplate='$%{y:.0f}<extra></extra><br>%{x|%Y-%m-%d}'
             ),
             row=r, col=c
         )
@@ -1430,7 +1456,7 @@ def plot_slot_equity_curves_plotly(
                 x=rolling_avg.index, y=rolling_avg[slot] * 100,
                 mode='lines', name=f'{slot} Rolling',
                 line=dict(width=1.5, dash='dash', color='gray'),  # <<<<< Rolling line gray
-                hovertemplate='$%{y:.0f}<extra></extra>'
+                hovertemplate='$%{y:.0f}<extra></extra><br>%{x|%Y-%m-%d}'
             ),
             row=r, col=c
         )
@@ -1564,19 +1590,16 @@ with tab6:
     else:
         st.markdown("##### Stability Test Settings")
 
-        # --- 📋 Create two columns
         col1, col2 = st.columns(2)
 
         with col1:
             lastDay_default = ema_df['OpenDate'].max().date()
-
             lastDay = st.date_input(
                 "Select Last Day for Analysis",
                 value=lastDay_default,
                 min_value=ema_df['OpenDate'].min().date(),
                 max_value=lastDay_default
             )
-
             entry_min, entry_max = st.slider(
                 "Select Entry Range (Number of Entries per Day)", 
                 min_value=3, max_value=20, 
@@ -1584,144 +1607,133 @@ with tab6:
             )
 
         with col2:
-            near_min, near_max = st.slider(
-                "Near Lookback Range (Months)", 
-                min_value=1, max_value=12, 
-                value=(2, 5)
-            )
+            near_min, near_max = st.slider("Near Lookback Range (Months)", 1, 12, (2, 5))
+            mid_min, mid_max = st.slider("Mid Lookback Range (Months)", 1, 12, (5, 9))
+            long_min, long_max = st.slider("Long Lookback Range (Months)", 1, 12, (9, 12))
 
-            mid_min, mid_max = st.slider(
-                "Mid Lookback Range (Months)", 
-                min_value=1, max_value=12, 
-                value=(5, 9)
-            )
+        # Button stays above progress/results
+        run_button = st.button("🚀 Run Stability Test")
 
-            long_min, long_max = st.slider(
-                "Long Lookback Range (Months)", 
-                min_value=1, max_value=12, 
-                value=(9, 12)
-            )
+        # Reserve container for both progress and results
+        results_container = st.empty()
 
-        st.markdown("")
+        if run_button:
+            start_time = time.time()
 
-        # --- Button to run
-        if st.button("🚀 Run Stability Test"):
-            start_time = time.time()  # ⏱ Start timer
+            with results_container.container():
+                # Progress bar starts first, inside results container
+                progress_bar = st.progress(0, text="🔍 Running stability optimization...")
 
-            # Progress bar setup
-            progress_bar = st.progress(0, text="🔎 Running stability optimization...")
+                # Prep ranges and params
+                entry_range = range(entry_min, entry_max + 1)
+                near_range = range(near_min, near_max + 1)
+                mid_range = range(mid_min, mid_max + 1)
+                long_range = range(long_min, long_max + 1)
 
-            # Build ranges
-            entry_range = range(entry_min, entry_max + 1)
-            near_range = range(near_min, near_max + 1)
-            mid_range = range(mid_min, mid_max + 1)
-            long_range = range(long_min, long_max + 1)
+                lastDay_dt = pd.to_datetime(lastDay)
+                rolling_windows = [
+                    (lastDay_dt - relativedelta(months=18), lastDay_dt),
+                    (lastDay_dt - relativedelta(months=12), lastDay_dt),
+                    (lastDay_dt - relativedelta(months=6), lastDay_dt)
+                ]
 
-            # Prepare rolling windows
-            lastDay_dt = pd.to_datetime(lastDay)
+                lookback_combinations = [
+                    (near, mid, long)
+                    for near, mid, long in product(near_range, mid_range, long_range)
+                    if near <= mid <= long
+                ]
+                total_tests = len(entry_range) * len(rolling_windows) * len(lookback_combinations)
+                completed_tests = 0
+                results = []
 
-            rolling_windows = [
-                (lastDay_dt - relativedelta(months=18), lastDay_dt),  # Last 18 months
-                (lastDay_dt - relativedelta(months=12), lastDay_dt),  # Last 12 months
-                (lastDay_dt - relativedelta(months=6), lastDay_dt)    # Last 6 months
-            ]
+                # Main test loop
+                for num_times in entry_range:
+                    for start_date, end_date in rolling_windows:
+                        for man_near, man_mid, man_long in lookback_combinations:
+                            daily_equity, _ = calculate_equity_curve_with_manual_lookbacks(
+                                ema_df=ema_df,
+                                start_date=start_date,
+                                end_date=end_date,
+                                equityStart=equity_start,
+                                risk=risk,
+                                num_times=num_times,
+                                man_near=man_near,
+                                man_mid=man_mid,
+                                man_long=man_long
+                            )
 
-            # Estimate total number of tests
-            lookback_combinations = [
-                (near, mid, long)
-                for near, mid, long in product(near_range, mid_range, long_range)
-                if near <= mid <= long
-            ]
-            total_tests = len(entry_range) * len(rolling_windows) * len(lookback_combinations)
+                            if not daily_equity.empty:
+                                cagr, _, _ = calculate_performance_metrics(daily_equity)
+                                results.append({
+                                    'Near': man_near,
+                                    'Mid': man_mid,
+                                    'Long': man_long,
+                                    'NumEntries': num_times,
+                                    'CAGR': cagr,
+                                    'Start': start_date,
+                                    'End': end_date
+                                })
 
-            completed_tests = 0
+                            completed_tests += 1
+                            progress_bar.progress(
+                                completed_tests / total_tests,
+                                text=f"🔍 Running stability optimization... {completed_tests}/{total_tests}"
+                            )
 
-            # --- Manual loop version to allow updating progress
-            results = []
-            for num_times in entry_range:
-                for start_date, end_date in rolling_windows:
-                    for man_near, man_mid, man_long in lookback_combinations:
-                        daily_equity, _ = calculate_equity_curve_with_manual_lookbacks(
-                            ema_df=ema_df,
-                            start_date=start_date,
-                            end_date=end_date,
-                            equityStart=equity_start,
-                            risk=risk,
-                            num_times=num_times,
-                            man_near=man_near,
-                            man_mid=man_mid,
-                            man_long=man_long
-                        )
+                results_df = pd.DataFrame(results)
 
-                        if not daily_equity.empty:
-                            cagr, _, _ = calculate_performance_metrics(daily_equity)
-                            results.append({
-                                'Near': man_near,
-                                'Mid': man_mid,
-                                'Long': man_long,
-                                'NumEntries': num_times,
-                                'CAGR': cagr,
-                                'Start': start_date,
-                                'End': end_date
-                            })
-
-                        completed_tests += 1
-                        progress_bar.progress(completed_tests / total_tests, text=f"🔎 Running stability optimization... {completed_tests}/{total_tests}")
-
-            results_df = pd.DataFrame(results)
-
-            if not results_df.empty:
-                results_df['Rank'] = results_df.groupby(['Start', 'End', 'NumEntries'])['CAGR'].rank(ascending=False, method="dense")
-
-                stability_df = (
-                    results_df.groupby(['Near', 'Mid', 'Long'])['Rank']
-                    .mean()
-                    .reset_index()
-                    .rename(columns={'Rank': 'Stability Score'})
-                    .sort_values(by='Stability Score')
-                )
-                stability_df = stability_df.round(2) 
-            else:
-                stability_df = pd.DataFrame()
-
-            # --- Final success block
-            end_time = time.time()
-            elapsed_seconds = int(end_time - start_time)
-            minutes, seconds = divmod(elapsed_seconds, 60)
-
-            if not stability_df.empty:
-                st.success(f"✅ Stability test completed! ({completed_tests:,} combinations tested in {minutes}m {seconds}s)")
-
-                # --- Create Plotly Table
-                fig = go.Figure(data=[go.Table(
-                    header=dict(
-                        values=list(stability_df.head(10).columns),
-                        align='center',
-                        font=dict(size=14, color='white'),
-                        fill_color='rgba(50,50,50,1)',
-                        height=30
-                    ),
-                    cells=dict(
-                        values=[stability_df.head(10)[col] for col in stability_df.head(10).columns],
-                        align='center',
-                        font=dict(size=14),
-                        fill_color='rgba(0,0,0,0)',
-                        height=28
+                if not results_df.empty:
+                    results_df['Rank'] = results_df.groupby(['Start', 'End', 'NumEntries'])['CAGR'].rank(
+                        ascending=False, method="dense"
                     )
-                )])
 
-                fig.update_layout(
-                    margin=dict(l=20, r=20, t=30, b=20),
-                    height=400
-                )
+                    stability_df = (
+                        results_df.groupby(['Near', 'Mid', 'Long'])['Rank']
+                        .mean()
+                        .reset_index()
+                        .rename(columns={'Rank': 'Stability Score'})
+                        .sort_values(by='Stability Score')
+                        .round(2)
+                    )
+                else:
+                    stability_df = pd.DataFrame()
 
-                # --- Create three columns: empty, table, empty
-                col1, col2, col3 = st.columns([1, 2, 1])
+                # Finalize
+                end_time = time.time()
+                minutes, seconds = divmod(int(end_time - start_time), 60)
 
-                with col2:
-                    st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.warning("⚠️ No stable lookbacks found.")
+                # Optional: hide progress bar after complete
+                progress_bar.empty()
+
+                if not stability_df.empty:
+                    st.success(f"✅ Stability test completed! ({completed_tests:,} combinations tested in {minutes}m {seconds}s)")
+
+                    fig = go.Figure(data=[go.Table(
+                        header=dict(
+                            values=list(stability_df.head(10).columns),
+                            align='center',
+                            font=dict(size=14, color='white'),
+                            fill_color='rgba(50,50,50,1)',
+                            height=30
+                        ),
+                        cells=dict(
+                            values=[stability_df.head(10)[col] for col in stability_df.head(10).columns],
+                            align='center',
+                            font=dict(size=14),
+                            fill_color='rgba(0,0,0,0)',
+                            height=28
+                        )
+                    )])
+
+                    fig.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=400)
+
+                    col1, col2, col3 = st.columns([1, 2, 1])
+                    with col2:
+                        st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("⚠️ No stable lookbacks found.")
+
+
 
 #endregion
 
