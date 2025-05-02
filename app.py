@@ -1445,7 +1445,7 @@ def plot_slot_equity_curves_plotly(
                 x=cumulative_pnl.index, y=cumulative_pnl[slot] * 100,
                 mode='lines', name=f'{slot} Cumulative',
                 line=dict(width=2, color="#6d6af3"),  # <<<<< Fixed color (adjust if you want)
-                hovertemplate='$%{y:.0f}<extra></extra><br>%{x|%Y-%m-%d}'
+                hovertemplate='%{x|%Y-%m-%d}<br>$%{y:.0f}<extra></extra>'
             ),
             row=r, col=c
         )
