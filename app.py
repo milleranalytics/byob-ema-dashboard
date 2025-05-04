@@ -255,8 +255,8 @@ def calculate_performance_metrics(equity_curve, equity_column='Equity'):
 
     # Calculate Sortino Ratio
     equity_curve['DailyReturn'] = equity_curve[equity_column].pct_change()
-    downside_returns = equity_curve['DailyReturn'][equity_curve['DailyReturn'] < 0]
-    downside_std = downside_returns.std()
+    downside_returns = np.minimum(equity_curve['DailyReturn'], 0)
+    downside_std = np.sqrt(np.mean(downside_returns**2))
 
     avg_return = equity_curve['DailyReturn'].mean()
     annualized_return = avg_return * 252
