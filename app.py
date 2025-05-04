@@ -1259,7 +1259,7 @@ with tab4:
                 "Next Trading Day to Simulate",
                 value=max_date + datetime.timedelta(days=1),
                 min_value=min_date,
-                max_value=max_date + datetime.timedelta(days=5)
+                max_value=max_date + datetime.timedelta(days=1)
             )
 
         with col2:
