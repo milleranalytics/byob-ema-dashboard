@@ -177,7 +177,7 @@ contracts = int(equity_start * (risk / 100) / num_times / (average_credit * 100)
 
 # --- 📋 Summary Expander below user input columns
 # -----------------------------------------------------
-with st.expander("📋 Summary of Selections, Derived Metrics & Save Defaults", expanded=False):
+with st.expander("Monthly Metrics & Defaults", expanded=False):
 
         # 💾 Save button goes here
     if st.button("💾 Save These Settings as Default"):
@@ -193,7 +193,7 @@ with st.expander("📋 Summary of Selections, Derived Metrics & Save Defaults", 
         save_defaults(new_defaults)
         st.success("✅ Defaults saved! Restart the app to load them.")
 
-    subcol1, subcol2 = st.columns(2)
+    subcol1, subcol2= st.columns(2)
 
     with subcol1:
         st.markdown(f"- **Start Date**: `{start_date.date()}`")
@@ -208,6 +208,7 @@ with st.expander("📋 Summary of Selections, Derived Metrics & Save Defaults", 
         st.markdown(f"- **Number of Entries**: `{num_times}`")
         st.markdown(f"- **Average Credit (per contract)**: `${average_credit:.2f}`")
         st.markdown(f"- **Starting Contracts per Trade**: `{contracts}`")
+
 
 
 # endregion

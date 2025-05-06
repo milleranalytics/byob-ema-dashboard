@@ -55,7 +55,7 @@ The BYOB EMA Dashboard is designed to help guide systematic monthly trading deci
 
 - **Updating Data**  
   - Data comes from [Trade Automation Toolbox](https://tradeautomationtoolbox.com/byob-ticks/?save=GkxAZ8D).
-  - Review results for all credit targets on all time slots on a 1-year and 3-month lookback window and pick the credit target that is holding up the best.
+  - At the start of each month, review results for all credit targets on all time slots on a 1-year and 3-month lookback window and pick the credit target that is holding up the best.
   - Overwrite the existing `EMA.csv` with the latest monthly data using the new credit target (if it changes) for all available time slots except 15:30 & 15:45 and a single contract from 2022 to current.
   - Re-run the app to reflect the updated data.
 
@@ -65,10 +65,11 @@ The BYOB EMA Dashboard is designed to help guide systematic monthly trading deci
     - Last **18 months**
     - Last **12 months**
     - Last **6 months**
-  -This ensures:
-    - Recent market behavior is **always included** in the analysis.
-    - The system captures **both long-term and short-term** stability factors.
-    - **Older, outdated market regimes** (>18 months ago) have **less influence**.
+    - This ensures:
+      - Recent market behavior is **always included** in the analysis to capture the changing market dynamics (best for walk-forward).
+      - The system captures **both long-term and short-term** stability factors.
+      - **Older, outdated market regimes** (>18 months ago) have **less influence**.
+  - The lookback stability testing also is over a wide range of number of entries per day.  This ensures that we are stable over several entries and not optimizing on a single number of entries.
   - Why this matters:
     - Markets change — volatility cycles, ideal credit targets, and sentiment regimes evolve. 0DTE trading is relatively new and the players are likely adapting to this new instrument.
     - By **emphasizing recency** while still **respecting broader trends**, the strategy adapts in a rolling-window fashion *without overfitting*.
