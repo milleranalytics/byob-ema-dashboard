@@ -14,6 +14,7 @@ from dateutil.relativedelta import relativedelta
 import time
 import json
 from pathlib import Path
+import io
 
 # Declare defautls
 DEFAULTS_PATH = Path("defaults.json")
@@ -812,29 +813,97 @@ with tab1:
                 st.subheader("Monthly Performance Table")
                 display_monthly_performance_table(equity_curve_with_dd, is_dark=True)
 
+                st.subheader("Detailed Trade Insights")
+
+                expander_col, button_col = st.columns([2, 1])
+
                 # --- 📅 Monthly Summary
-                with st.expander("📅 Monthly Trading Summary"):
-                    monthly_summary = full_trades.groupby(full_trades['Date'].dt.to_period('M'))
+                with expander_col:
+                    with st.expander("📅 Monthly Trading Summary"):
+                        monthly_summary = full_trades.groupby(full_trades['Date'].dt.to_period('M'))
 
-                    for month_period, month_trades in monthly_summary:
-                        st.markdown(f"##### {month_period.strftime('%Y-%m')}")
+                        for month_period, month_trades in monthly_summary:
+                            st.markdown(f"##### {month_period.strftime('%Y-%m')}")
 
-                        selected_times = sorted(month_trades['OpenTime'].unique())
-                        selected_times_str = ', '.join(selected_times) if selected_times else "No trades"
-                        end_equity = month_trades['Equity'].iloc[-1]
+                            selected_times = sorted(month_trades['OpenTime'].unique())
+                            selected_times_str = ', '.join(selected_times) if selected_times else "No trades"
+                            end_equity = month_trades['Equity'].iloc[-1]
 
-                        far_start = month_trades['LongLookbackStart'].min()
-                        far_end = month_trades['LongLookbackEnd'].max()
-                        mid_start = month_trades['MidLookbackStart'].min()
-                        mid_end = month_trades['MidLookbackEnd'].max()
-                        near_start = month_trades['NearLookbackStart'].min()
-                        near_end = month_trades['NearLookbackEnd'].max()
+                            far_start = month_trades['LongLookbackStart'].min()
+                            far_end = month_trades['LongLookbackEnd'].max()
+                            mid_start = month_trades['MidLookbackStart'].min()
+                            mid_end = month_trades['MidLookbackEnd'].max()
+                            near_start = month_trades['NearLookbackStart'].min()
+                            near_end = month_trades['NearLookbackEnd'].max()
 
-                        st.markdown(f"📅 **Far Lookback:** {man_long} months — {far_start.strftime('%m/%d/%Y')} to {far_end.strftime('%m/%d/%Y')}")
-                        st.markdown(f"📅 **Mid Lookback:** {man_mid} months — {mid_start.strftime('%m/%d/%Y')} to {mid_end.strftime('%m/%d/%Y')}")
-                        st.markdown(f"📅 **Near Lookback:** {man_near} months — {near_start.strftime('%m/%d/%Y')} to {near_end.strftime('%m/%d/%Y')}")
-                        st.markdown(f"⏰ **Selected Times:** {selected_times_str}")
-                        st.markdown(f"💵 **End Equity:** ${end_equity:,.2f}")
+                            st.markdown(f"📅 **Far Lookback:** {man_long} months — {far_start.strftime('%m/%d/%Y')} to {far_end.strftime('%m/%d/%Y')}")
+                            st.markdown(f"📅 **Mid Lookback:** {man_mid} months — {mid_start.strftime('%m/%d/%Y')} to {mid_end.strftime('%m/%d/%Y')}")
+                            st.markdown(f"📅 **Near Lookback:** {man_near} months — {near_start.strftime('%m/%d/%Y')} to {near_end.strftime('%m/%d/%Y')}")
+                            st.markdown(f"⏰ **Selected Times:** {selected_times_str}")
+                            st.markdown(f"💵 **End Equity:** ${end_equity:,.2f}")
+                            
+                with button_col:
+                    if full_trades is not None and not full_trades.empty:
+                    # ⏱️ Create sorted and trimmed DataFrame for export
+                        export_cols = [
+                            'Date', 'OpenTime', 'Contracts', 'PremiumCapture', 'ProfitLoss', 'Equity',
+                            'NearLookback', 'NearLookbackStart', 'NearLookbackEnd',
+                            'MidLookback', 'MidLookbackStart', 'MidLookbackEnd',
+                            'LongLookback', 'LongLookbackStart', 'LongLookbackEnd'
+                        ]
+                        
+                        # Only include columns that actually exist (some may be missing in edge cases)
+                        export_cols = [col for col in export_cols if col in full_trades.columns]
+                        
+                        full_trades_sorted = full_trades[export_cols].sort_values(by=["Date", "OpenTime"])
+
+                        # Round dollar columns to 2 decimal places
+                        for col in ['PremiumCapture', 'ProfitLoss', 'Equity']:
+                            if col in full_trades_sorted.columns:
+                                full_trades_sorted[col] = full_trades_sorted[col].round(2)
+
+                        # Format all date columns to YYYY-MM-DD strings
+                        date_cols = [
+                            'Date',
+                            'NearLookbackStart', 'NearLookbackEnd',
+                            'MidLookbackStart', 'MidLookbackEnd',
+                            'LongLookbackStart', 'LongLookbackEnd'
+                        ]
+
+                        for col in date_cols:
+                            if col in full_trades_sorted.columns:
+                                full_trades_sorted[col] = pd.to_datetime(full_trades_sorted[col]).dt.strftime('%Y-%m-%d')
+
+                        # Set up in-memory Excel export
+                        excel_buffer = io.BytesIO()
+
+                        with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as writer:
+                            full_trades_sorted.to_excel(writer, index=False, sheet_name='Trades')
+
+                            workbook = writer.book
+                            worksheet = writer.sheets['Trades']
+
+                            # Define formats
+                            header_format = workbook.add_format({'bold': True, 'bg_color': '#333333', 'font_color': 'white'})
+                            dollar_format = workbook.add_format({'num_format': '$#,##0.00'})
+
+                            # Apply header formatting
+                            for col_num, col_name in enumerate(full_trades_sorted.columns):
+                                worksheet.write(0, col_num, col_name, header_format)
+
+                            # Auto width and conditional formatting
+                            for i, col in enumerate(full_trades_sorted.columns):
+                                max_len = max(full_trades_sorted[col].astype(str).map(len).max(), len(col))
+                                format_to_use = dollar_format if col in ['PremiumCapture', 'ProfitLoss', 'Equity'] else None
+                                worksheet.set_column(i, i, max_len + 2, format_to_use)
+
+                        # Streamlit download button
+                        st.download_button(
+                            label="📊 Download Excel Trade Log (.xlsx)",
+                            data=excel_buffer.getvalue(),
+                            file_name="equity_curve_trades.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
 
 # endregion
 

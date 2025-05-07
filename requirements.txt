@@ -3,3 +3,5 @@ pandas
 matplotlib
 numpy
 plotly>=5.0.0
+XlsxWriter
+
