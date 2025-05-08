@@ -20,10 +20,10 @@ Welcome to the BYOB EMA Trading Dashboard — a private research tool designed t
    - These should ideally be selected based on stability testing (see Lookback Optimization).
 
 5. **Explore Tabs for Analysis**
-   - **Tab 1: Equity Curve and Drawdown** — View an equity curve, the main performance metrics, as well as a table of monthly performance history for the variables that were chosen above.
+   - **Tab 1: Equity Curve and Drawdown** — View an equity curve, the main performance metrics, as well as a table of monthly performance history for the variables that were chosen above.  This tab also has some confirmation checks so you can see inside the backtest data to confirm the entry times chosen in the backtest match with what you expect them to be.
    - **Tab 2: Entries Optimization** — Explore how performance metrics vary by number of daily entries.
    - **Tab 3: Risk Optimization** — Explore how performance metrics vary by daily risk percentage.
-   - **Tab 4: Entry Time PCR Analysis** — Audit best entry times for the next trading day based on current lookbacks. Run this on the 1st of each month and leave static for the entire month to match the way the equity curve is calculated. Going up and down number of entries mid-month is expected as account grows and shrinks.
+   - **Tab 4: Entry Time PCR Analysis** — Audit best entry times for the next trading day based on current lookbacks. Run this on the 1st of each month and leave static for the entire month to match the way the equity curve is calculated. Going up and down number of entries mid-month is expected as account grows and shrinks.  You can manually choose the date to run this analysis as well, which allows you to double check the bascktest historical logic.
    - **Tab 5: Entry Time Trends** — Track rolling equity trends of individual entry times for discretionary overlay.
    - **Tab 6: Lookback Stability Optimization** — Re-optimize for the most stable lookback periods each month to maintain robustness. While this level of optimization is great for a rolling-window approach in future trading, this part of the strategy does allow some lookahead bias to creep into the backtest results.  The hope is that by testing over a wide variety of lookbacks and number of entries, it won't be hyper-optimized for the best results but find something that has been stable and will continue to be stable.
 
