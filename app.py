@@ -83,7 +83,7 @@ min_date = ema_df['OpenDate'].min().date()
 max_date = ema_df['OpenDate'].max().date()
 
 # Default start date: 1 year back from max_date
-one_year_ago = max_date - datetime.timedelta(days=365)
+one_year_ago = max_date - datetime.timedelta(days=365) + datetime.timedelta(days=1)
 default_start_date = max(one_year_ago, min_date)  # Prevent going earlier than dataset
 
 # endregion
