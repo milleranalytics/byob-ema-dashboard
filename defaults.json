@@ -2,7 +2,7 @@
   "man_near": 2,
   "man_mid": 5,
   "man_long": 10,
-  "num_times": 9,
+   "num_times": 12, 
   "risk": 4.4,
   "equity_start": 300000,
   "credit_target": 2.5

@@ -42,9 +42,11 @@ man_near = defaults.get("man_near", 2)
 man_mid = defaults.get("man_mid", 5)
 man_long = defaults.get("man_long", 10)
 num_times = defaults.get("num_times", 12)
+# default_min_times, default_target_times = defaults.get("num_times", (12, 12))
 risk = defaults.get("risk", 4.0)
 equity_start = defaults.get("equity_start", 400_000)
 credit_target = defaults.get("credit_target", 2.5)
+num_times_range = range(3, 25) # Range for num times optimizer
 
 
 # Title
@@ -124,10 +126,17 @@ with col2:
         step=0.1,
         help="The maximum % of your equity you are willing to risk on a single day. Example: 4% of $400,000 = $16,000 max daily risk.  'Risk' is equal to target credit received for the day assuming -100% PCR is about as bad as it gets, hence 'Risk'."
     )
+    # min_num_times, target_num_times = st.slider(
+    #     "Entry Range (Min → Target)",
+    #     min_value=2,
+    #     max_value=24,
+    #     value=(default_min_times, default_target_times),
+    #     help="Minimum and target number of entries per day based on account scaling."
+    # )
     num_times = st.slider(
         "Number of Entries",
         min_value=2,
-        max_value=20,
+        max_value=24,
         value=num_times,
         help="Number of entry times selected each day."
     )
@@ -473,6 +482,7 @@ def calculate_equity_curve_with_manual_lookbacks(
 
         # Daily trade grouping
         for trade_date, day_trades in current_period_data.groupby('OpenDate'):
+            day_trades = day_trades.sort_values('OpenTimeFormatted')
             average_credit = day_trades['Premium'].mean()
             contracts = int(current_equity * (risk / 100) / num_times / (average_credit * 100)) if average_credit else 0
 
@@ -553,17 +563,20 @@ def create_standard_fig(rows=1, cols=1, row_heights=None, vertical_spacing=0.1, 
 
 # --- 📋 Standard Table Template
 
-def create_standard_table(df, negative_cols=None, decimals=1, theme="auto", height=None):
+def create_standard_table(df, negative_cols=None, decimals=1, theme="auto", height=None, column_widths=None):
     """
     Create a standard plotly Table styled to match Streamlit dark/light mode.
-    
+
     Parameters:
     - df (DataFrame): Pandas DataFrame to display
     - negative_cols (List[str], optional): Columns where negative numbers should be red
     - decimals (int): Number of decimals to show
     - theme (str): "auto", "dark", or "light"
     - height (int, optional): Manually set table height if needed
+    - column_widths (List[int], optional): Relative widths for each column
     """
+
+    import plotly.graph_objects as go
 
     # --- Theme detection
     theme_bg = st.get_option("theme.backgroundColor")
@@ -626,7 +639,7 @@ def create_standard_table(df, negative_cols=None, decimals=1, theme="auto", heig
 
             # Background color
             if row_label == 'AVG':
-                backgrounds.append(header_fill)  # Subtle highlight for AVG row
+                backgrounds.append(header_fill)
             else:
                 backgrounds.append(cell_fill)
 
@@ -634,9 +647,9 @@ def create_standard_table(df, negative_cols=None, decimals=1, theme="auto", heig
         font_colors.append(colors)
         fill_colors.append(backgrounds)
 
-
-    # --- Create Table
+    # --- Create Table with optional column widths
     fig = go.Figure(data=[go.Table(
+        columnwidth=column_widths,  # ✅ Added here
         header=dict(
             values=[index_col] + list(df.columns),
             fill_color=header_fill,
@@ -686,21 +699,38 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
 # -----------------------------------------------------
 
 # --- Monthly Performance Table
-def display_monthly_performance_table(equity_df, is_dark=True, equity_col='Equity'):
+def display_monthly_performance_table(equity_df, is_dark=True, equity_col='Equity', equity_start=equity_start):
+    import calendar
+
     df = equity_df.copy()
     df['Month'] = df['Date'].dt.to_period('M')
     df['Year'] = df['Date'].dt.year
     df['MonthName'] = df['Date'].dt.month.apply(lambda x: calendar.month_abbr[x])
-    df['DailyReturn'] = df[equity_col].pct_change()
 
     # Monthly returns
-    monthly_returns = (
-        df.groupby('Month')[equity_col]
-        .apply(lambda x: (x.iloc[-1] / x.iloc[0] - 1) * 100)
-        .reset_index(name='Return')
-    )
-    monthly_returns['Year'] = monthly_returns['Month'].dt.year
-    monthly_returns['MonthName'] = monthly_returns['Month'].dt.month.apply(lambda x: calendar.month_abbr[x])
+    monthly_returns = []
+    unique_months = df['Month'].unique()
+
+    for i, month in enumerate(unique_months):
+        month_data = df[df['Month'] == month]
+        month_end_equity = month_data[equity_col].iloc[-1]
+
+        if i == 0:
+            month_start_equity = equity_start
+        else:
+            prev_month = unique_months[i - 1]
+            prev_month_data = df[df['Month'] == prev_month]
+            month_start_equity = prev_month_data[equity_col].iloc[-1]
+
+        month_return = (month_end_equity / month_start_equity - 1) * 100
+        monthly_returns.append({
+            'Month': month,
+            'Return': month_return,
+            'Year': month.year,
+            'MonthName': calendar.month_abbr[month.month]
+        })
+
+    monthly_returns = pd.DataFrame(monthly_returns)
 
     # Max Drawdown per year
     drawdowns = []
@@ -715,30 +745,87 @@ def display_monthly_performance_table(equity_df, is_dark=True, equity_col='Equit
     pivot = monthly_returns.pivot(index='Year', columns='MonthName', values='Return')
     pivot = pivot.reindex(columns=month_order)
 
-    # Add TOTAL and MaxDD
-    start_of_year = df.groupby(df['Date'].dt.year).first()[equity_col]
-    end_of_year = df.groupby(df['Date'].dt.year).last()[equity_col]
-    total_returns = ((end_of_year / start_of_year - 1) * 100).round(1)
-    pivot['TOTAL'] = total_returns
-    pivot['MaxDD'] = dd_df['MaxDD'].round(1)
+    # --- ✅ Begin/End Balances with correct start logic
+    equity_df = equity_df.set_index("Date")
+    years = equity_df.index.year.unique()
+    start_balances = {}
+    end_balances = {}
+
+    for year in years:
+        jan_1 = pd.to_datetime(f"{year}-01-01")
+        dec_31_prev = jan_1 - pd.Timedelta(days=1)
+        dec_31 = pd.to_datetime(f"{year}-12-31")
+
+        # Begin balance logic
+        if dec_31_prev in equity_df.index:
+            begin = equity_df.loc[dec_31_prev, equity_col]
+        else:
+            begin = equity_start  # ✅ fallback to initial equity if no Dec 31 prior year
+
+        # End balance logic
+        if dec_31 in equity_df.index:
+            end = equity_df.loc[dec_31, equity_col]
+        else:
+            end = equity_df.iloc[-1][equity_col]
+
+        start_balances[year] = begin
+        end_balances[year] = end
+
+    start_bal = pd.Series(start_balances)
+    end_bal = pd.Series(end_balances)
+    pl_dollars = (end_bal - start_bal).round(2)
+    pl_percent = ((end_bal / start_bal - 1) * 100).round(1)
+
+    # Add new columns
+    pivot.insert(0, "Begin Bal", start_bal.round(2))
+    pivot["End Bal"] = end_bal.round(2)
+    pivot["P/L ($)"] = pl_dollars
+    pivot["P/L (%)"] = pl_percent
+    pivot["MaxDD"] = dd_df['MaxDD'].round(1)
 
     # Add AVG row
-    avg_row = pivot[month_order + ['TOTAL']].mean(numeric_only=True)
-    avg_row['MaxDD'] = None
-    pivot.loc['AVG'] = avg_row
+    avg_row = pivot[month_order + ["P/L (%)"]].mean(numeric_only=True)
+    avg_row["Begin Bal"] = None
+    avg_row["End Bal"] = None
+    avg_row["P/L ($)"] = None
+    avg_row["MaxDD"] = None
+    pivot.loc["AVG"] = avg_row
     pivot.index.name = None
     pivot.columns.name = None
 
-    # --- 🆕 Create Table using your helper --- 
+    # Format for display
+    display_df = pivot.copy()
+    for col in ["Begin Bal", "End Bal", "P/L ($)"]:
+        display_df[col] = display_df[col].apply(lambda x: f"${x:,.0f}" if pd.notnull(x) else "")
+    display_df["P/L (%)"] = display_df["P/L (%)"].apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else "")
+    display_df["MaxDD"] = display_df["MaxDD"].apply(lambda x: f"{x:.1f}%" if pd.notnull(x) else "")
+
+    # --- 📊 Final Table Render
+    # Widen specific columns and include the index
+    wide_cols = ["Begin Bal", "End Bal", "P/L ($)"]
+    index_width = 60  # width for Year/index column
+
+    column_widths = [index_width]  # start with index column
+
+    # Loop through actual dataframe columns
+    for col in display_df.columns:
+        if col in wide_cols:
+            column_widths.append(75)  # wide columns
+        else:
+            column_widths.append(60)  # default width
+
+    # Call the updated table function
     fig = create_standard_table(
-        df=pivot,
+        df=display_df,
         negative_cols=month_order,
         decimals=1,
         theme="dark" if is_dark else "light",
-        height=250  # 🧠 Set this smaller instead of auto height!
+        height=250,
+        column_widths=column_widths  # ✅ this now works
     )
 
     st.plotly_chart(fig, use_container_width=True)
+
 
 with tab1:
     st.subheader(f"Equity Curve and Drawdown ({start_date.date()} to {end_date.date()})")
@@ -771,13 +858,19 @@ with tab1:
                 pcr = calculate_pcr(full_trades)
                 cagr, mar_ratio, sortino = calculate_performance_metrics(equity_curve_with_dd)
 
-                # --- 📈 Top Metrics Display
-                col1, col2, col3, col4, col5 = st.columns([1, 1, 1, 1, 1])
+                # --- ✅ Win Rate Calculation
+                total_trades = len(full_trades)
+                wins = len(full_trades[full_trades["ProfitLoss"] > 0])
+                win_rate = wins / total_trades if total_trades > 0 else 0
+
+                # --- 📈 Top Metrics Display (6 columns now)
+                col1, col2, col3, col4, col5, col6 = st.columns([1, 1, 1, 1, 1, 1])
                 col1.metric("CAGR", f"{cagr:.2%}")
                 col2.metric("MAR Ratio", f"{mar_ratio:.2f}")
                 col3.metric("Sortino Ratio", f"{sortino:.2f}")
                 col4.metric("Max Drawdown", f"{max_drawdown:.2f}%")
                 col5.metric("PCR", f"{pcr:.2f}%")
+                col6.metric("Win Rate", f"{win_rate:.2%}")
 
                 # --- 📈 Chart
                 fig, is_dark = create_standard_fig(rows=2, cols=1, row_heights=[0.6, 0.4], height=800)
@@ -958,7 +1051,7 @@ def optimize_num_entries_with_manual_lookbacks(
 def run_num_entries_sweep(ema_df, start_date, end_date, equity_start, risk, man_near, man_mid, man_long):
     return optimize_num_entries_with_manual_lookbacks(
         ema_df=ema_df,
-        num_times_range=range(3, 21),
+        num_times_range=num_times_range,
         equityStart=equity_start,
         risk=risk,
         start_date=start_date,
@@ -976,8 +1069,6 @@ with tab2:
     st.markdown(
         f"##### Target Credit: ${credit_target:.2f} | Risk: {risk:.1f}% | Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
     )
-
-    num_times_range = range(3, 21)
 
     # Reserve UI space early
     optimization_container = st.empty()
