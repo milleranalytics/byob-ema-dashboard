@@ -711,18 +711,22 @@ def display_monthly_performance_table(equity_df, is_dark=True, equity_col='Equit
     monthly_returns = []
     unique_months = df['Month'].unique()
 
-    for i, month in enumerate(unique_months):
+    for month in unique_months:
         month_data = df[df['Month'] == month]
+        if month_data.empty:
+            continue
+
         month_end_equity = month_data[equity_col].iloc[-1]
 
-        if i == 0:
-            month_start_equity = equity_start
+        # Get the last equity from before this month starts
+        prev_data = df[df['Date'] < month_data['Date'].iloc[0]]
+        if not prev_data.empty:
+            month_start_equity = prev_data[equity_col].iloc[-1]
         else:
-            prev_month = unique_months[i - 1]
-            prev_month_data = df[df['Month'] == prev_month]
-            month_start_equity = prev_month_data[equity_col].iloc[-1]
+            month_start_equity = equity_start
 
         month_return = (month_end_equity / month_start_equity - 1) * 100
+
         monthly_returns.append({
             'Month': month,
             'Return': month_return,
@@ -752,21 +756,20 @@ def display_monthly_performance_table(equity_df, is_dark=True, equity_col='Equit
     end_balances = {}
 
     for year in years:
-        jan_1 = pd.to_datetime(f"{year}-01-01")
-        dec_31_prev = jan_1 - pd.Timedelta(days=1)
-        dec_31 = pd.to_datetime(f"{year}-12-31")
-
-        # Begin balance logic
-        if dec_31_prev in equity_df.index:
-            begin = equity_df.loc[dec_31_prev, equity_col]
+        # Find last date in prior year
+        prior_year = year - 1
+        prior_data = equity_df[equity_df.index.year == prior_year]
+        if not prior_data.empty:
+            begin = prior_data.iloc[-1][equity_col]
         else:
-            begin = equity_start  # ✅ fallback to initial equity if no Dec 31 prior year
+            begin = equity_start
 
-        # End balance logic
-        if dec_31 in equity_df.index:
-            end = equity_df.loc[dec_31, equity_col]
+        # Find last date in current year
+        year_data = equity_df[equity_df.index.year == year]
+        if not year_data.empty:
+            end = year_data.iloc[-1][equity_col]
         else:
-            end = equity_df.iloc[-1][equity_col]
+            end = None  # You could choose to skip this year if no data
 
         start_balances[year] = begin
         end_balances[year] = end
