@@ -15,6 +15,7 @@ import time
 import json
 from pathlib import Path
 import io
+from math import floor
 
 # Declare defautls
 DEFAULTS_PATH = Path("defaults.json")
@@ -126,13 +127,6 @@ with col2:
         step=0.1,
         help="The maximum % of your equity you are willing to risk on a single day. Example: 4% of $400,000 = $16,000 max daily risk.  'Risk' is equal to target credit received for the day assuming -100% PCR is about as bad as it gets, hence 'Risk'."
     )
-    # min_num_times, target_num_times = st.slider(
-    #     "Entry Range (Min → Target)",
-    #     min_value=2,
-    #     max_value=24,
-    #     value=(default_min_times, default_target_times),
-    #     help="Minimum and target number of entries per day based on account scaling."
-    # )
     num_times = st.slider(
         "Number of Entries",
         min_value=2,
@@ -182,7 +176,8 @@ average_credit = filtered_df['Premium'].mean()
 if pd.isnull(average_credit) or average_credit <= 0:
     average_credit = 1.0  # Prevent divide by zero
 
-contracts = int(equity_start * (risk / 100) / num_times / (average_credit * 100))
+contracts = floor(equity_start * (risk / 100) / num_times / (average_credit * 100))
+
 
 
 # --- 📋 Summary Expander below user input columns
@@ -414,13 +409,13 @@ def mark_best_times(df, best_times):
     return df
 
 
+
 def calculate_equity_curve_with_manual_lookbacks(
-    ema_df, start_date, end_date, equityStart, risk, num_times, man_near, man_mid, man_long
+    ema_df, start_date, end_date, equityStart, risk, num_times, man_near, man_mid, man_long, average_credit
 ):
-    """
-    Calculate the equity curve using fixed manual lookback periods for Near, Mid, and Long terms.
-    Ensures historical data is retained for proper lookback calculations.
-    """
+    import pandas as pd
+    import streamlit as st
+
     if ema_df.empty:
         st.warning("⚠️ Warning: Empty EMA DataFrame passed to equity curve calculation.")
         return pd.DataFrame(), pd.DataFrame()
@@ -432,10 +427,9 @@ def calculate_equity_curve_with_manual_lookbacks(
     current_equity = equityStart
     results = []
 
-    # Get periods within selected range
+    # Filter to the final test window
     filtered_periods = ema_df[(ema_df['OpenDate'] >= pd.to_datetime(start_date)) & 
                               (ema_df['OpenDate'] <= pd.to_datetime(end_date))].copy()
-
     filtered_periods['PeriodStart'] = filtered_periods['OpenDate'].dt.to_period('M').dt.start_time
     unique_periods = filtered_periods['PeriodStart'].unique()
 
@@ -445,7 +439,6 @@ def calculate_equity_curve_with_manual_lookbacks(
         long_start = current_period - pd.DateOffset(months=man_long)
         lookback_end = current_period - pd.Timedelta(days=1)
 
-        # Lookback windows from full dataset
         near_data = ema_df[(ema_df['OpenDate'] >= near_start) & (ema_df['OpenDate'] <= lookback_end)]
         mid_data = ema_df[(ema_df['OpenDate'] >= mid_start) & (ema_df['OpenDate'] <= lookback_end)]
         long_data = ema_df[(ema_df['OpenDate'] >= long_start) & (ema_df['OpenDate'] <= lookback_end)]
@@ -454,7 +447,6 @@ def calculate_equity_curve_with_manual_lookbacks(
             st.warning(f"⚠️ Skipping {current_period.strftime('%Y-%m')} — no available lookback data.")
             continue
 
-        # Build average PCR from available lookbacks
         lookback_dfs = []
         if not near_data.empty:
             lookback_dfs.append(near_data.groupby('OpenTimeFormatted')['PCR'].mean().rename('Near_PCR'))
@@ -466,7 +458,6 @@ def calculate_equity_curve_with_manual_lookbacks(
         avg_pcr_df = pd.concat(lookback_dfs, axis=1).mean(axis=1).reset_index()
         avg_pcr_df.columns = ['OpenTimeFormatted', 'PCR']
 
-        # Select top N times
         top_times_sorted = avg_pcr_df.nlargest(num_times, 'PCR') \
                                      .sort_values('OpenTimeFormatted')['OpenTimeFormatted'] \
                                      .tolist()
@@ -474,17 +465,16 @@ def calculate_equity_curve_with_manual_lookbacks(
         current_period_data = ema_df[(ema_df['OpenDate'] >= current_period) & 
                                      (ema_df['OpenDate'] < current_period + pd.DateOffset(months=1))]
 
-        current_period_data = mark_best_times(current_period_data, top_times_sorted)
-        current_period_data = current_period_data[current_period_data['BestTime'] == 1]
+        current_period_data = current_period_data[current_period_data['OpenTimeFormatted'].isin(top_times_sorted)]
+        current_period_data = current_period_data[current_period_data['OpenDate'] >= pd.to_datetime(start_date)]
 
         if current_period_data.empty:
             continue
 
-        # Daily trade grouping
         for trade_date, day_trades in current_period_data.groupby('OpenDate'):
+            equity_at_day_start = equityStart if trade_date == pd.to_datetime(start_date) else current_equity
             day_trades = day_trades.sort_values('OpenTimeFormatted')
-            average_credit = day_trades['Premium'].mean()
-            contracts = int(current_equity * (risk / 100) / num_times / (average_credit * 100)) if average_credit else 0
+            contracts = floor(equity_at_day_start * (risk / 100) / num_times / (average_credit * 100)) if average_credit else 0
 
             for _, trade in day_trades.iterrows():
                 profit_loss = trade['PremiumCapture'] * contracts
@@ -508,16 +498,11 @@ def calculate_equity_curve_with_manual_lookbacks(
                     'LongLookbackEnd': lookback_end,
                 })
 
-    results_df = pd.DataFrame(results)
 
-    # Filter to final selected date range
+    results_df = pd.DataFrame(results)
     filtered_results = results_df[(results_df['Date'] >= pd.to_datetime(start_date)) & 
                                   (results_df['Date'] <= pd.to_datetime(end_date))]
-
-    # Aggregate final daily equity
-    daily_equity = filtered_results.groupby('Date', as_index=False) \
-                                   .agg({'Equity': 'last'}) \
-                                   .sort_values(by='Date')
+    daily_equity = filtered_results.groupby('Date', as_index=False)['Equity'].last().sort_values(by='Date')
 
     return daily_equity, filtered_results
 
@@ -851,7 +836,8 @@ with tab1:
                 num_times=num_times,
                 man_near=man_near,
                 man_mid=man_mid,
-                man_long=man_long
+                man_long=man_long,
+                average_credit=average_credit
             )
 
             if equity_curve.empty:
@@ -1025,7 +1011,8 @@ def optimize_num_entries_with_manual_lookbacks(
             num_times=num_times,
             man_near=man_near,
             man_mid=man_mid,
-            man_long=man_long
+            man_long=man_long,
+            average_credit=average_credit
         )
 
         if daily_equity_manual.empty:
@@ -1177,7 +1164,8 @@ def optimize_risk_for_manual_lookbacks_cached(
             num_times=num_times,
             man_near=man_near,
             man_mid=man_mid,
-            man_long=man_long
+            man_long=man_long,
+            average_credit=average_credit
         )
 
         if daily_equity.empty:
@@ -1706,7 +1694,8 @@ def test_lookback_stability_with_overlap_cached(
                     num_times=num_times,
                     man_near=man_near,
                     man_mid=man_mid,
-                    man_long=man_long
+                    man_long=man_long,
+                    average_credit=average_credit
                 )
 
                 if daily_equity.empty:
@@ -1823,7 +1812,8 @@ with tab6:
                                 num_times=num_times,
                                 man_near=man_near,
                                 man_mid=man_mid,
-                                man_long=man_long
+                                man_long=man_long,
+                                average_credit=average_credit
                             )
 
                             if not daily_equity.empty:
