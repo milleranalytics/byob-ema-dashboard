@@ -5,5 +5,6 @@
   "num_times": 9,
   "risk": 4.4,
   "equity_start": 300000,
-  "credit_target": 2.5
+  "credit_target": 2.5,
+  "scoring_method" : "Stability-Adjusted PCR"
 }

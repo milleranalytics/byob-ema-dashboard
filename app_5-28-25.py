@@ -48,7 +48,6 @@ risk = defaults.get("risk", 4.0)
 equity_start = defaults.get("equity_start", 400_000)
 credit_target = defaults.get("credit_target", 2.5)
 num_times_range = range(3, 25) # Range for num times optimizer
-scoring_method = defaults.get("scoring_method", "Average PCR") 
 
 
 # Title
@@ -97,7 +96,7 @@ default_start_date = max(one_year_ago, min_date)  # Prevent going earlier than d
 # -----------------------------------------------------
 col1, col2, col3 = st.columns(3)
 
-# --- 📅 Column 1: Dates & Time Selection Method
+# --- 📅 Column 1: Dates
 with col1:
     start_date = st.date_input(
         "Start Date",
@@ -112,18 +111,6 @@ with col1:
         min_value=min_date,
         max_value=max_date,
         help="Last day of the backtest period. Only trades up to and including this date are included."
-    )
-
-    # --- 🧠 Entry Time Scoring Method Selector
-    scoring_options = [
-        "Average PCR",
-        "Stability-Adjusted PCR"
-    ]
-    scoring_method = st.selectbox(
-        "Entry Time Scoring Method",
-        options=scoring_options,
-        index=scoring_options.index(scoring_method),  # use saved default
-        help="Choose how entry times are ranked. 'Stability-Adjusted PCR' favors both high PCR and consistency across lookbacks."
     )
 
 # --- 💵 Column 2: Risk + Entries
@@ -206,8 +193,7 @@ with st.expander("Monthly Metrics & Defaults", expanded=False):
             "num_times": num_times,
             "risk": risk,
             "equity_start": equity_start,
-            "credit_target": credit_target,
-            "scoring_method": scoring_method
+            "credit_target": credit_target
         }
         save_defaults(new_defaults)
         st.success("✅ Defaults saved! Restart the app to load them.")
