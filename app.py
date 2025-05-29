@@ -124,6 +124,8 @@ with col1:
         options=scoring_options,
         index=scoring_options.index(scoring_method),  # use saved default
         help="Choose how entry times are ranked. 'Stability-Adjusted PCR' favors both high PCR and consistency across lookbacks."
+        # Note**: We tested a multi-factor scoring model including win rate, premium, and PCR trend.
+        # It added no measurable improvement vs. pure PCR scoring — so we've removed it to reduce complexity and overfitting risk.
     )
 
 # --- 💵 Column 2: Risk + Entries
@@ -227,6 +229,7 @@ with st.expander("Monthly Metrics & Defaults", expanded=False):
         st.markdown(f"- **Number of Entries**: `{num_times}`")
         st.markdown(f"- **Average Credit (per contract)**: `${average_credit:.2f}`")
         st.markdown(f"- **Starting Contracts per Trade**: `{contracts}`")
+        st.markdown(f"- **Selected Scoring Method:**: `{scoring_method}`")
 
 
 
@@ -341,55 +344,101 @@ def calculate_drawdown(equity_curve, equity_column='Equity'):
 
     return equity_curve, max_drawdown
 
-
-def find_best_times(df, top_n):
+# New function that allows multiple scoring methods to determine the entry times.
+def score_entry_times(df, method="Average PCR", top_n=None, return_ranked=True):
     """
-    Identify the best trading times based on average PCR, ensuring times are sorted chronologically.
+    Scores entry times based on selected method and returns a DataFrame with scores and ranks.
 
     Parameters:
-        df (DataFrame): The input DataFrame containing PCR and OpenTimeFormatted.
-        top_n (int): Number of top times to select based on PCR.
+    - df: DataFrame with 'OpenTimeFormatted', 'Near_PCR', 'Mid_PCR', 'Long_PCR'
+    - method: Scoring method ('Average PCR' or 'Stability-Adjusted PCR')
+    - top_n: (Optional) return only top N times
+    - return_ranked: If True, includes 'Rank' column based on descending score
 
     Returns:
-        List[str]: List of top 'OpenTimeFormatted' times, sorted from earliest to latest.
+    - DataFrame with OpenTimeFormatted, Score, and optionally Rank
     """
-    if df.empty:
-        st.warning("⚠️ Warning: Empty dataframe passed to find_best_times. Returning empty list.")
-        return []
-
-    if 'PCR' not in df.columns or 'OpenTimeFormatted' not in df.columns:
-        st.error("❌ Error: Required columns 'PCR' or 'OpenTimeFormatted' not found in DataFrame.")
-        return []
-
     df = df.copy()
-    df = df.dropna(subset=['PCR'])
 
-    if df.empty:
-        st.warning("⚠️ Warning: All PCR values were NaN. Returning empty list.")
-        return []
+    if method == "Average PCR":
+        df["Score"] = df[["Near_PCR", "Mid_PCR", "Long_PCR"]].mean(axis=1)
 
-    # Calculate the average PCR for each OpenTimeFormatted
-    average_pcr_by_time = df.groupby('OpenTimeFormatted', as_index=False)['PCR'].mean()
+    elif method == "Stability-Adjusted PCR":
+        penalty_factor = 3  # ⬅️ Adjust this value as needed
 
-    # Limit top_n to available unique times
-    top_n = min(top_n, len(average_pcr_by_time))
+        def stability_score(row):
+            pcrs = np.array([row["Near_PCR"], row["Mid_PCR"], row["Long_PCR"]])
+            avg = np.mean(pcrs)
+            downside = np.sqrt(np.mean(np.minimum(pcrs - avg, 0) ** 2))
+            return avg / (1 + penalty_factor * downside)
 
-    # Convert OpenTimeFormatted to actual time for proper sorting
-    try:
-        average_pcr_by_time['TimeConverted'] = pd.to_datetime(average_pcr_by_time['OpenTimeFormatted'], format='%H:%M').dt.time
-    except Exception as e:
-        st.error(f"❌ Error parsing OpenTimeFormatted times: {e}")
-        return []
+        df["Score"] = df.apply(stability_score, axis=1)
 
-    # Select top N times based on PCR, then sort by real time
-    best_times_sorted = (
-        average_pcr_by_time.nlargest(top_n, 'PCR')
-        .sort_values(by='TimeConverted')
-        .reset_index(drop=True)['OpenTimeFormatted']
-        .tolist()
-    )
+    else:
+        raise ValueError(f"Unsupported scoring method: {method}")
 
-    return best_times_sorted
+    # Rank scores descending (1 = best)
+    if return_ranked:
+        df["Rank"] = df["Score"].rank(ascending=False, method="dense")
+
+    # Sort by score (desc) and time (asc)
+    df = df.sort_values(by=["Score", "OpenTimeFormatted"], ascending=[False, True])
+
+    # Optionally filter top N
+    if top_n is not None:
+        df = df.head(top_n)
+
+    return df.reset_index(drop=True)
+
+
+# def find_best_times(df, top_n):
+#     """
+#     Identify the best trading times based on average PCR, ensuring times are sorted chronologically.
+
+#     Parameters:
+#         df (DataFrame): The input DataFrame containing PCR and OpenTimeFormatted.
+#         top_n (int): Number of top times to select based on PCR.
+
+#     Returns:
+#         List[str]: List of top 'OpenTimeFormatted' times, sorted from earliest to latest.
+#     """
+#     if df.empty:
+#         st.warning("⚠️ Warning: Empty dataframe passed to find_best_times. Returning empty list.")
+#         return []
+
+#     if 'PCR' not in df.columns or 'OpenTimeFormatted' not in df.columns:
+#         st.error("❌ Error: Required columns 'PCR' or 'OpenTimeFormatted' not found in DataFrame.")
+#         return []
+
+#     df = df.copy()
+#     df = df.dropna(subset=['PCR'])
+
+#     if df.empty:
+#         st.warning("⚠️ Warning: All PCR values were NaN. Returning empty list.")
+#         return []
+
+#     # Calculate the average PCR for each OpenTimeFormatted
+#     average_pcr_by_time = df.groupby('OpenTimeFormatted', as_index=False)['PCR'].mean()
+
+#     # Limit top_n to available unique times
+#     top_n = min(top_n, len(average_pcr_by_time))
+
+#     # Convert OpenTimeFormatted to actual time for proper sorting
+#     try:
+#         average_pcr_by_time['TimeConverted'] = pd.to_datetime(average_pcr_by_time['OpenTimeFormatted'], format='%H:%M').dt.time
+#     except Exception as e:
+#         st.error(f"❌ Error parsing OpenTimeFormatted times: {e}")
+#         return []
+
+#     # Select top N times based on PCR, then sort by real time
+#     best_times_sorted = (
+#         average_pcr_by_time.nlargest(top_n, 'PCR')
+#         .sort_values(by='TimeConverted')
+#         .reset_index(drop=True)['OpenTimeFormatted']
+#         .tolist()
+#     )
+
+#     return best_times_sorted
 
 
 def mark_best_times(df, best_times):
@@ -425,10 +474,11 @@ def mark_best_times(df, best_times):
 
 
 def calculate_equity_curve_with_manual_lookbacks(
-    ema_df, start_date, end_date, equityStart, risk, num_times, man_near, man_mid, man_long, average_credit
+    ema_df, start_date, end_date, equityStart, risk, num_times, man_near, man_mid, man_long, average_credit, scoring_method="Average PCR"
 ):
     import pandas as pd
     import streamlit as st
+    from math import floor
 
     if ema_df.empty:
         st.warning("⚠️ Warning: Empty EMA DataFrame passed to equity curve calculation.")
@@ -441,7 +491,6 @@ def calculate_equity_curve_with_manual_lookbacks(
     current_equity = equityStart
     results = []
 
-    # Filter to the final test window
     filtered_periods = ema_df[(ema_df['OpenDate'] >= pd.to_datetime(start_date)) & 
                               (ema_df['OpenDate'] <= pd.to_datetime(end_date))].copy()
     filtered_periods['PeriodStart'] = filtered_periods['OpenDate'].dt.to_period('M').dt.start_time
@@ -462,25 +511,42 @@ def calculate_equity_curve_with_manual_lookbacks(
             continue
 
         lookback_dfs = []
+
         if not near_data.empty:
             lookback_dfs.append(near_data.groupby('OpenTimeFormatted')['PCR'].mean().rename('Near_PCR'))
+            lookback_dfs.append(near_data.groupby('OpenTimeFormatted')['ProfitLossAfterSlippage'].mean().rename('Near_Premium'))
+            lookback_dfs.append(near_data.groupby('OpenTimeFormatted')['IsWin'].mean().rename('Near_WinRate'))
+
         if not mid_data.empty:
             lookback_dfs.append(mid_data.groupby('OpenTimeFormatted')['PCR'].mean().rename('Mid_PCR'))
+            lookback_dfs.append(mid_data.groupby('OpenTimeFormatted')['ProfitLossAfterSlippage'].mean().rename('Mid_Premium'))
+            lookback_dfs.append(mid_data.groupby('OpenTimeFormatted')['IsWin'].mean().rename('Mid_WinRate'))
+
         if not long_data.empty:
             lookback_dfs.append(long_data.groupby('OpenTimeFormatted')['PCR'].mean().rename('Long_PCR'))
+            lookback_dfs.append(long_data.groupby('OpenTimeFormatted')['ProfitLossAfterSlippage'].mean().rename('Long_Premium'))
+            lookback_dfs.append(long_data.groupby('OpenTimeFormatted')['IsWin'].mean().rename('Long_WinRate'))
 
-        avg_pcr_df = pd.concat(lookback_dfs, axis=1).mean(axis=1).reset_index()
-        avg_pcr_df.columns = ['OpenTimeFormatted', 'PCR']
+        avg_pcr_df = pd.concat(lookback_dfs, axis=1).reset_index()
 
-        top_times_sorted = avg_pcr_df.nlargest(num_times, 'PCR') \
-                                     .sort_values('OpenTimeFormatted')['OpenTimeFormatted'] \
-                                     .tolist()
+        # Compute average premium and win rate
+        avg_pcr_df["premium"] = avg_pcr_df[["Near_Premium", "Mid_Premium", "Long_Premium"]].mean(axis=1)
+        avg_pcr_df["win_rate"] = avg_pcr_df[["Near_WinRate", "Mid_WinRate", "Long_WinRate"]].mean(axis=1)
+
+        # Score times using the selected method
+        scored_df = score_entry_times(
+            avg_pcr_df,
+            method=scoring_method,
+            top_n=num_times
+        )
+        top_times_sorted = scored_df.sort_values("OpenTimeFormatted")["OpenTimeFormatted"].tolist()
 
         current_period_data = ema_df[(ema_df['OpenDate'] >= current_period) & 
                                      (ema_df['OpenDate'] < current_period + pd.DateOffset(months=1))]
-
         current_period_data = current_period_data[current_period_data['OpenTimeFormatted'].isin(top_times_sorted)]
         current_period_data = current_period_data[current_period_data['OpenDate'] >= pd.to_datetime(start_date)]
+
+        current_period_data = mark_best_times(current_period_data, top_times_sorted)
 
         if current_period_data.empty:
             continue
@@ -511,7 +577,6 @@ def calculate_equity_curve_with_manual_lookbacks(
                     'LongLookbackStart': long_start,
                     'LongLookbackEnd': lookback_end,
                 })
-
 
     results_df = pd.DataFrame(results)
     filtered_results = results_df[(results_df['Date'] >= pd.to_datetime(start_date)) & 
@@ -851,7 +916,8 @@ with tab1:
                 man_near=man_near,
                 man_mid=man_mid,
                 man_long=man_long,
-                average_credit=average_credit
+                average_credit=average_credit,
+                scoring_method=scoring_method
             )
 
             if equity_curve.empty:
@@ -1008,11 +1074,8 @@ with tab1:
 # -----------------------------------------------------
 def optimize_num_entries_with_manual_lookbacks(
     ema_df, num_times_range, equityStart, risk, start_date, end_date, man_near, man_mid, man_long,
-    performance_func
+    performance_func, scoring_method
 ):
-    """
-    Optimize number of entries for manual lookbacks, returning CAGR, MAR, Sortino, and Max Drawdown.
-    """
     results = []
 
     for num_times in num_times_range:
@@ -1026,7 +1089,8 @@ def optimize_num_entries_with_manual_lookbacks(
             man_near=man_near,
             man_mid=man_mid,
             man_long=man_long,
-            average_credit=average_credit
+            average_credit=average_credit,
+            scoring_method=scoring_method  # ✅ Now passed into the backtest
         )
 
         if daily_equity_manual.empty:
@@ -1050,9 +1114,8 @@ def optimize_num_entries_with_manual_lookbacks(
     return pd.DataFrame(results)
 
 
-# --- 📈 Cached Optimization Sweep
 @st.cache_data(show_spinner=False)
-def run_num_entries_sweep(ema_df, start_date, end_date, equity_start, risk, man_near, man_mid, man_long):
+def run_num_entries_sweep(ema_df, start_date, end_date, equity_start, risk, man_near, man_mid, man_long, scoring_method):
     return optimize_num_entries_with_manual_lookbacks(
         ema_df=ema_df,
         num_times_range=num_times_range,
@@ -1063,28 +1126,24 @@ def run_num_entries_sweep(ema_df, start_date, end_date, equity_start, risk, man_
         man_near=man_near,
         man_mid=man_mid,
         man_long=man_long,
-        performance_func=calculate_performance_metrics
+        performance_func=calculate_performance_metrics,
+        scoring_method=scoring_method
     )
 
 
-# --- 🎯 Tab 2: Entries Optimization
 with tab2:
     st.subheader(f"Entries Optimization Analysis ({start_date.date()} to {end_date.date()})")
     st.markdown(
         f"##### Target Credit: ${credit_target:.2f} | Risk: {risk:.1f}% | Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
     )
 
-    # Reserve UI space early
     optimization_container = st.empty()
-
-    # Define columns up front so layout doesn't flicker
     col1, col2 = st.columns(2)
 
     if ema_df.empty:
         with optimization_container.container():
             st.warning("⚠️ No data available.")
     else:
-        # Run calculation inside the container and spinner
         with optimization_container.container():
             with st.spinner("🔄 Optimizing number of entries..."):
                 optimization_results = run_num_entries_sweep(
@@ -1095,7 +1154,8 @@ with tab2:
                     risk=risk,
                     man_near=man_near,
                     man_mid=man_mid,
-                    man_long=man_long
+                    man_long=man_long,
+                    scoring_method=scoring_method  # ✅ Passed into cached optimizer
                 )
 
                 if optimization_results.empty:
@@ -1138,22 +1198,19 @@ with tab2:
                         fig.data[0].hovertemplate = hovertemplate
 
                         fig.update_layout(
-                            title=metric_title,
+                            title=f"{metric_title} — {scoring_method}",
                             xaxis_title="Number of Entries",
                             yaxis_title=metric_title,
                             xaxis=dict(tickmode='linear', dtick=1),
                             yaxis_tickformat=yaxis_tickformat,
                         )
 
-                        # Alternate columns
                         if idx % 2 == 0:
                             with col1:
                                 st.plotly_chart(fig, use_container_width=True)
                         else:
                             with col2:
                                 st.plotly_chart(fig, use_container_width=True)
-
-
 # endregion
 
 
@@ -1921,4 +1978,3 @@ with tab7:
         st.error("❌ README.md file not found. Please add it to your project directory.")
 
 #endregion
-
