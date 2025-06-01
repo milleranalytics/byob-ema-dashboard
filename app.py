@@ -1756,7 +1756,7 @@ with tab6:
             entry_min, entry_max = st.slider(
                 "Select Entry Range (Number of Entries per Day)", 
                 min_value=3, max_value=20, 
-                value=(8, 12)
+                value=(8, 13)
             )
 
         with col2:
@@ -1864,14 +1864,14 @@ with tab6:
 
                     fig = go.Figure(data=[go.Table(
                         header=dict(
-                            values=list(stability_df.head(10).columns),
+                            values=list(stability_df.head(15).columns),
                             align='center',
                             font=dict(size=14, color='white'),
                             fill_color='rgba(50,50,50,1)',
                             height=30
                         ),
                         cells=dict(
-                            values=[stability_df.head(10)[col] for col in stability_df.head(10).columns],
+                            values=[stability_df.head(15)[col] for col in stability_df.head(15).columns],
                             align='center',
                             font=dict(size=14),
                             fill_color='rgba(0,0,0,0)',
@@ -1879,7 +1879,7 @@ with tab6:
                         )
                     )])
 
-                    fig.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=400)
+                    fig.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=520)
 
                     col1, col2, col3 = st.columns([1, 2, 1])
                     with col2:
