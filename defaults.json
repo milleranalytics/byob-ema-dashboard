@@ -5,5 +5,8 @@
   "num_times": 13,
   "risk": 4.0,
   "equity_start": 300000,
-  "credit_target": 2.4
+  "credit_target": 2.4,
+  "trend_ranking_days": 120,
+  "trend_smoothing_days": 20,
+  "trend_smoothing_type": "SMA"
 }
