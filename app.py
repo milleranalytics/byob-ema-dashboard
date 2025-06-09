@@ -43,12 +43,13 @@ man_near = defaults.get("man_near", 2)
 man_mid = defaults.get("man_mid", 5)
 man_long = defaults.get("man_long", 10)
 num_times = defaults.get("num_times", 12)
-# default_min_times, default_target_times = defaults.get("num_times", (12, 12))
 risk = defaults.get("risk", 4.0)
-equity_start = defaults.get("equity_start", 400_000)
+equity_start = defaults.get("equity_start", 300_000)
 credit_target = defaults.get("credit_target", 2.5)
 num_times_range = range(3, 25) # Range for num times optimizer
-
+trend_ranking_days = defaults.get("trend_ranking_days", 160)
+trend_smoothing_days = defaults.get("trend_smoothing_days", 5)
+trend_smoothing_type = defaults.get("trend_smoothing_type", "SMA")
 
 # Title
 st.title("BYOB EMA Dashboard")
@@ -112,6 +113,12 @@ with col1:
         max_value=max_date,
         help="Last day of the backtest period. Only trades up to and including this date are included."
     )
+    selection_method = st.selectbox(
+        "Entry Time Selection Method",
+        options=["Average PCR", "Time Trends"],
+        index=1,
+        help="Choose how entry times are selected each period. 'Average PCR' uses a 3-tiered lookback. 'Time Trends' uses cumulative performance with trend filtering."
+    )
 
 # --- 💵 Column 2: Risk + Entries
 with col2:
@@ -125,7 +132,7 @@ with col2:
         "Risk per Day (%)",
         value=risk,
         step=0.1,
-        help="The maximum % of your equity you are willing to risk on a single day. Example: 4% of $400,000 = $16,000 max daily risk.  'Risk' is equal to target credit received for the day assuming -100% PCR is about as bad as it gets, hence 'Risk'."
+        help="Max % of equity you're willing to risk per day. Example: 4% of $400,000 = $16,000."
     )
     num_times = st.slider(
         "Number of Entries",
@@ -135,31 +142,53 @@ with col2:
         help="Number of entry times selected each day."
     )
 
-# --- 🔎 Column 3: Lookbacks
+# --- 🔎 Column 3: Dynamic Lookback or Trend Options
 with col3:
-    man_near = st.number_input(
-        "Near Lookback (months)",
-        value=man_near,
-        step=1,
-        min_value=1,
-        help="Short-term lookback period in months used to find best entry times. Emphasizes recent market behavior."
-    )
-    man_mid = st.number_input(
-        "Mid Lookback (months)",
-        value=man_mid,
-        step=1,
-        min_value=1,
-        help="Medium-term lookback period in months to smooth entry time selection."
-    )
-    man_long = st.number_input(
-        "Long Lookback (months)",
-        value=man_long,
-        step=1,
-        min_value=1,
-        help="Long-term lookback period in months to stabilize entry time selection against outliers."
-    )
-
-
+    if selection_method == "Average PCR":
+        man_near = st.number_input(
+            "Near Lookback (months)",
+            value=man_near,
+            step=1,
+            min_value=1,
+            help="Short-term lookback period in months used to find best entry times."
+        )
+        man_mid = st.number_input(
+            "Mid Lookback (months)",
+            value=man_mid,
+            step=1,
+            min_value=1,
+            help="Medium-term lookback period in months to smooth entry time selection."
+        )
+        man_long = st.number_input(
+            "Long Lookback (months)",
+            value=man_long,
+            step=1,
+            min_value=1,
+            help="Long-term lookback period in months to stabilize entry time selection."
+        )
+    else:
+        trend_ranking_days = st.number_input(
+            "Trend Ranking Window (Days)",
+            value=trend_ranking_days,
+            step=5,
+            min_value=10,
+            max_value=250,
+            help="Number of recent trading days to rank entry times on cumulative performance."
+        )
+        trend_smoothing_days = st.number_input(
+            "Trend Smoothing Window",
+            value=trend_smoothing_days,
+            step=1,
+            min_value=2,
+            max_value=60,
+            help="Window size for moving average used to confirm upward trend in entry time."
+        )
+        trend_smoothing_type = st.selectbox(
+            "Smoothing Type",
+            options=["SMA", "EMA"],
+            index=0 if trend_smoothing_type == "SMA" else 1,
+            help="Type of moving average used for trend confirmation."
+        )
 # endregion
 
 
@@ -182,7 +211,7 @@ contracts = floor(equity_start * (risk / 100) / num_times / (average_credit * 10
 
 # --- 📋 Summary Expander below user input columns
 # -----------------------------------------------------
-with st.expander("Monthly Metrics & Defaults", expanded=False):
+with st.expander("Metrics & Defaults", expanded=False):
 
         # 💾 Save button goes here
     if st.button("💾 Save These Settings as Default"):
@@ -193,12 +222,17 @@ with st.expander("Monthly Metrics & Defaults", expanded=False):
             "num_times": num_times,
             "risk": risk,
             "equity_start": equity_start,
-            "credit_target": credit_target
+            "credit_target": credit_target,
+            "trend_ranking_days": trend_ranking_days,
+            "trend_smoothing_days": trend_smoothing_days,
+            "trend_smoothing_type": trend_smoothing_type,
+            "selection_method": selection_method
         }
+        
         save_defaults(new_defaults)
         st.success("✅ Defaults saved! Restart the app to load them.")
 
-    subcol1, subcol2= st.columns(2)
+    subcol1, subcol2, subcol3 = st.columns(3)
 
     with subcol1:
         st.markdown(f"- **Start Date**: `{start_date.date()}`")
@@ -213,6 +247,12 @@ with st.expander("Monthly Metrics & Defaults", expanded=False):
         st.markdown(f"- **Number of Entries**: `{num_times}`")
         st.markdown(f"- **Average Credit (per contract)**: `${average_credit:.2f}`")
         st.markdown(f"- **Starting Contracts per Trade**: `{contracts}`")
+
+    with subcol3:
+        st.markdown(f"- **Entry Selection Method:** `{selection_method}`")
+        st.markdown(f"- **Trend Ranking Days**: `{trend_ranking_days}`")
+        st.markdown(f"- **Trend Smoothing Days**: `{trend_smoothing_days}`")
+        st.markdown(f"- **Smoothing Type**: `{trend_smoothing_type}`")
 
 
 
@@ -409,13 +449,56 @@ def mark_best_times(df, best_times):
     return df
 
 
+def select_times_via_time_trends(ema_df, end_date, num_times, ranking_window, smoothing_window, smoothing_type):
+    recent_df = ema_df[ema_df['OpenDate'] <= end_date].copy()
 
-def calculate_equity_curve_with_manual_lookbacks(
-    ema_df, start_date, end_date, equityStart, risk, num_times, man_near, man_mid, man_long, average_credit
+    recent_dates = recent_df['OpenDate'].drop_duplicates().sort_values().tail(ranking_window)
+    recent_df = recent_df[recent_df['OpenDate'].isin(recent_dates)]
+
+    pnl_by_time = (
+        recent_df.groupby(['OpenDate', 'OpenTimeFormatted'])['PremiumCapture']
+        .sum()
+        .reset_index()
+        .pivot(index='OpenDate', columns='OpenTimeFormatted', values='PremiumCapture')
+        .fillna(0)
+    )
+
+    cumulative = pnl_by_time.cumsum()
+
+    if smoothing_type.upper() == 'EMA':
+        trend = cumulative.ewm(span=smoothing_window, min_periods=1).mean()
+    else:
+        trend = cumulative.rolling(window=smoothing_window, min_periods=1).mean()
+
+    final_cum = cumulative.iloc[-1]
+    final_trend = trend.iloc[-1]
+
+    # Select only those outperforming their trend
+    selected = final_cum[final_cum > final_trend]
+
+    if selected.empty:
+        return []
+
+    top_times = selected.sort_values(ascending=False).head(num_times).index.tolist()
+    return sorted(top_times)
+
+
+def calculate_equity_curve_with_dynamic_method(
+    ema_df,
+    start_date,
+    end_date,
+    equityStart,
+    risk,
+    num_times,
+    man_near,
+    man_mid,
+    man_long,
+    average_credit,
+    selection_method,
+    trend_ranking_days,
+    trend_smoothing_days,
+    trend_smoothing_type
 ):
-    import pandas as pd
-    import streamlit as st
-
     if ema_df.empty:
         st.warning("⚠️ Warning: Empty EMA DataFrame passed to equity curve calculation.")
         return pd.DataFrame(), pd.DataFrame()
@@ -423,47 +506,72 @@ def calculate_equity_curve_with_manual_lookbacks(
     ema_df = ema_df.copy()
     ema_df['OpenDate'] = pd.to_datetime(ema_df['OpenDate'])
     ema_df = ema_df.sort_values('OpenDate')
-
     current_equity = equityStart
     results = []
 
-    # Filter to the final test window
-    filtered_periods = ema_df[(ema_df['OpenDate'] >= pd.to_datetime(start_date)) & 
-                              (ema_df['OpenDate'] <= pd.to_datetime(end_date))].copy()
-    filtered_periods['PeriodStart'] = filtered_periods['OpenDate'].dt.to_period('M').dt.start_time
-    unique_periods = filtered_periods['PeriodStart'].unique()
+    # Define loop frequency
+    if selection_method == "Time Trends":
+        first_monday = start_date - datetime.timedelta(days=start_date.weekday())
+        loop_dates = pd.date_range(start=first_monday, end=end_date, freq='W-MON')
+    else:
+        ema_df['PeriodStart'] = ema_df['OpenDate'].dt.to_period('M').dt.start_time
+        loop_dates = ema_df[
+            (ema_df['OpenDate'] >= pd.to_datetime(start_date)) &
+            (ema_df['OpenDate'] <= pd.to_datetime(end_date))
+        ]['PeriodStart'].unique()
 
-    for current_period in unique_periods:
-        near_start = current_period - pd.DateOffset(months=man_near)
-        mid_start = current_period - pd.DateOffset(months=man_mid)
-        long_start = current_period - pd.DateOffset(months=man_long)
-        lookback_end = current_period - pd.Timedelta(days=1)
+    for current_period in loop_dates:
+        if selection_method == "Average PCR":
+            near_start = current_period - pd.DateOffset(months=man_near)
+            mid_start = current_period - pd.DateOffset(months=man_mid)
+            long_start = current_period - pd.DateOffset(months=man_long)
+            lookback_end = current_period - pd.Timedelta(days=1)
 
-        near_data = ema_df[(ema_df['OpenDate'] >= near_start) & (ema_df['OpenDate'] <= lookback_end)]
-        mid_data = ema_df[(ema_df['OpenDate'] >= mid_start) & (ema_df['OpenDate'] <= lookback_end)]
-        long_data = ema_df[(ema_df['OpenDate'] >= long_start) & (ema_df['OpenDate'] <= lookback_end)]
+            near_data = ema_df[(ema_df['OpenDate'] >= near_start) & (ema_df['OpenDate'] <= lookback_end)]
+            mid_data = ema_df[(ema_df['OpenDate'] >= mid_start) & (ema_df['OpenDate'] <= lookback_end)]
+            long_data = ema_df[(ema_df['OpenDate'] >= long_start) & (ema_df['OpenDate'] <= lookback_end)]
 
-        if near_data.empty and mid_data.empty and long_data.empty:
-            st.warning(f"⚠️ Skipping {current_period.strftime('%Y-%m')} — no available lookback data.")
+            lookback_dfs = []
+            if not near_data.empty:
+                lookback_dfs.append(near_data.groupby('OpenTimeFormatted')['PCR'].mean().rename('Near_PCR'))
+            if not mid_data.empty:
+                lookback_dfs.append(mid_data.groupby('OpenTimeFormatted')['PCR'].mean().rename('Mid_PCR'))
+            if not long_data.empty:
+                lookback_dfs.append(long_data.groupby('OpenTimeFormatted')['PCR'].mean().rename('Long_PCR'))
+
+            if not lookback_dfs:
+                continue
+
+            avg_pcr_df = pd.concat(lookback_dfs, axis=1).mean(axis=1).reset_index()
+            avg_pcr_df.columns = ['OpenTimeFormatted', 'PCR']
+            top_times_sorted = avg_pcr_df.nlargest(num_times, 'PCR') \
+                                         .sort_values('OpenTimeFormatted')['OpenTimeFormatted'] \
+                                         .tolist()
+
+        elif selection_method == "Time Trends":
+            top_times_sorted = select_times_via_time_trends(
+                ema_df=ema_df,
+                end_date=current_period,
+                num_times=num_times,
+                ranking_window=trend_ranking_days,
+                smoothing_window=trend_smoothing_days,
+                smoothing_type=trend_smoothing_type
+            )
+        else:
             continue
 
-        lookback_dfs = []
-        if not near_data.empty:
-            lookback_dfs.append(near_data.groupby('OpenTimeFormatted')['PCR'].mean().rename('Near_PCR'))
-        if not mid_data.empty:
-            lookback_dfs.append(mid_data.groupby('OpenTimeFormatted')['PCR'].mean().rename('Mid_PCR'))
-        if not long_data.empty:
-            lookback_dfs.append(long_data.groupby('OpenTimeFormatted')['PCR'].mean().rename('Long_PCR'))
+        if selection_method == "Time Trends":
+            period_end = min(current_period + pd.Timedelta(days=7), end_date + pd.Timedelta(days=1))
 
-        avg_pcr_df = pd.concat(lookback_dfs, axis=1).mean(axis=1).reset_index()
-        avg_pcr_df.columns = ['OpenTimeFormatted', 'PCR']
-
-        top_times_sorted = avg_pcr_df.nlargest(num_times, 'PCR') \
-                                     .sort_values('OpenTimeFormatted')['OpenTimeFormatted'] \
-                                     .tolist()
-
-        current_period_data = ema_df[(ema_df['OpenDate'] >= current_period) & 
-                                     (ema_df['OpenDate'] < current_period + pd.DateOffset(months=1))]
+            current_period_data = ema_df[
+                (ema_df['OpenDate'] >= current_period) &
+                (ema_df['OpenDate'] < period_end)
+            ]
+        else:
+            current_period_data = ema_df[
+                (ema_df['OpenDate'] >= current_period) &
+                (ema_df['OpenDate'] < current_period + pd.DateOffset(months=1))
+            ]
 
         current_period_data = current_period_data[current_period_data['OpenTimeFormatted'].isin(top_times_sorted)]
         current_period_data = current_period_data[current_period_data['OpenDate'] >= pd.to_datetime(start_date)]
@@ -473,13 +581,14 @@ def calculate_equity_curve_with_manual_lookbacks(
 
         for trade_date, day_trades in current_period_data.groupby('OpenDate'):
             equity_at_day_start = equityStart if trade_date == pd.to_datetime(start_date) else current_equity
-            day_trades = day_trades.sort_values('OpenTimeFormatted')
             contracts = floor(equity_at_day_start * (risk / 100) / num_times / (average_credit * 100)) if average_credit else 0
+            day_trades = day_trades.sort_values('OpenTimeFormatted')
 
             for _, trade in day_trades.iterrows():
                 profit_loss = trade['PremiumCapture'] * contracts
                 current_equity += profit_loss
-                results.append({
+
+                row = {
                     'Date': trade['OpenDate'],
                     'OpenTime': trade['OpenTimeFormatted'],
                     'Contracts': contracts,
@@ -487,25 +596,28 @@ def calculate_equity_curve_with_manual_lookbacks(
                     'Premium': trade['Premium'],
                     'ProfitLoss': profit_loss,
                     'Equity': current_equity,
-                    'NearLookback': man_near,
-                    'NearLookbackStart': near_start,
-                    'NearLookbackEnd': lookback_end,
-                    'MidLookback': man_mid,
-                    'MidLookbackStart': mid_start,
-                    'MidLookbackEnd': lookback_end,
-                    'LongLookback': man_long,
-                    'LongLookbackStart': long_start,
-                    'LongLookbackEnd': lookback_end,
-                })
+                    'SelectionMethod': selection_method
+                }
 
+                if selection_method == "Average PCR":
+                    row.update({
+                        'NearLookback': man_near,
+                        'NearLookbackStart': near_start,
+                        'NearLookbackEnd': lookback_end,
+                        'MidLookback': man_mid,
+                        'MidLookbackStart': mid_start,
+                        'MidLookbackEnd': lookback_end,
+                        'LongLookback': man_long,
+                        'LongLookbackStart': long_start,
+                        'LongLookbackEnd': lookback_end
+                    })
+
+                results.append(row)
 
     results_df = pd.DataFrame(results)
-    filtered_results = results_df[(results_df['Date'] >= pd.to_datetime(start_date)) & 
-                                  (results_df['Date'] <= pd.to_datetime(end_date))]
-    daily_equity = filtered_results.groupby('Date', as_index=False)['Equity'].last().sort_values(by='Date')
+    daily_equity = results_df.groupby('Date', as_index=False)['Equity'].last().sort_values(by='Date')
 
-    return daily_equity, filtered_results
-
+    return daily_equity, results_df
 
 
 # --- 📈 Standard Figure Template to ensure charts are the same
@@ -668,13 +780,14 @@ def create_standard_table(df, negative_cols=None, decimals=1, theme="auto", heig
 
 # region --- 📊 Visualization Tabs Structure
 # -----------------------------------------------------
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📈 Equity Curve",
     "🔎 Entries Optimization",
     "🔎 Risk Optimization",
     "🎯 Entry Time PCR",
     "📈 Entry Time Trends",
     "🔎 Lookback Optimization",
+    "🔎 Trend Optimization",
     "📖 Instructions"
 ])
 # endregion
@@ -816,9 +929,14 @@ def display_monthly_performance_table(equity_df, is_dark=True, equity_col='Equit
 
 
 with tab1:
+    # Dynamic lookback string
+    if selection_method == "Average PCR":
+        lookback_str = f"Average PCR Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
+    else:
+        lookback_str = f"Trend Ranking: Last {trend_ranking_days} days / {trend_smoothing_days}-day {trend_smoothing_type.upper()}"
     st.subheader(f"Equity Curve and Drawdown ({start_date.date()} to {end_date.date()})")
     st.markdown(
-        f"##### Target Credit: ${credit_target:.2f} | Entries: {num_times} | Risk: {risk:.1f}% | Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
+        f"##### Target Credit: ${credit_target:.2f} | Entries: {num_times} | Risk: {risk:.1f}% | {lookback_str}"
     )
 
     # Reserve container for all UI output
@@ -827,7 +945,7 @@ with tab1:
     # Spinner gives grayed-out feedback while calculations are running
     with equity_container.container():
         with st.spinner("🔄 Calculating equity curve and performance metrics..."):
-            equity_curve, full_trades = calculate_equity_curve_with_manual_lookbacks(
+            equity_curve, full_trades = calculate_equity_curve_with_dynamic_method(
                 ema_df=ema_df,
                 start_date=start_date,
                 end_date=end_date,
@@ -837,7 +955,11 @@ with tab1:
                 man_near=man_near,
                 man_mid=man_mid,
                 man_long=man_long,
-                average_credit=average_credit
+                average_credit=average_credit,
+                selection_method=selection_method,  # <-- from the dropdown
+                trend_ranking_days=trend_ranking_days,
+                trend_smoothing_days=trend_smoothing_days,
+                trend_smoothing_type=trend_smoothing_type
             )
 
             if equity_curve.empty:
@@ -901,26 +1023,72 @@ with tab1:
 
                 # --- 📅 Monthly Summary
                 with expander_col:
-                    with st.expander("📅 Monthly Trading Summary"):
-                        monthly_summary = full_trades.groupby(full_trades['Date'].dt.to_period('M'))
+                    with st.expander("📅 Trading Summary"):
+                        if selection_method == "Average PCR":
+                            period_group = full_trades['Date'].dt.to_period('M')
+                            label_format = "%Y-%m"
+                        else:
+                            # Group by Monday of each week (start of trading week)
+                            period_group = full_trades['Date'] - pd.to_timedelta(full_trades['Date'].dt.weekday, unit='D')
+                            period_group = period_group.dt.to_period('W')
+                            label_format = "Week of %Y-%m-%d"
 
-                        for month_period, month_trades in monthly_summary:
-                            st.markdown(f"##### {month_period.strftime('%Y-%m')}")
+                        for period, trades in full_trades.groupby(period_group):
+                            period_start_date = period.start_time if hasattr(period, 'start_time') else period
 
-                            selected_times = sorted(month_trades['OpenTime'].unique())
+                            if selection_method == "Average PCR":
+                                st.markdown(f"##### {period.strftime('%Y-%m')}")
+                            else:
+                                st.markdown(f"##### Week of {period_start_date.strftime('%Y-%m-%d')}")
+
+                            selected_times = sorted(trades['OpenTime'].unique())
                             selected_times_str = ', '.join(selected_times) if selected_times else "No trades"
-                            end_equity = month_trades['Equity'].iloc[-1]
+                            end_equity = trades['Equity'].iloc[-1]
 
-                            far_start = month_trades['LongLookbackStart'].min()
-                            far_end = month_trades['LongLookbackEnd'].max()
-                            mid_start = month_trades['MidLookbackStart'].min()
-                            mid_end = month_trades['MidLookbackEnd'].max()
-                            near_start = month_trades['NearLookbackStart'].min()
-                            near_end = month_trades['NearLookbackEnd'].max()
+                            if selection_method == "Average PCR":
+                                # Show lookback details only for PCR-based selection
+                                far_start = trades['LongLookbackStart'].min()
+                                far_end = trades['LongLookbackEnd'].max()
+                                mid_start = trades['MidLookbackStart'].min()
+                                mid_end = trades['MidLookbackEnd'].max()
+                                near_start = trades['NearLookbackStart'].min()
+                                near_end = trades['NearLookbackEnd'].max()
 
-                            st.markdown(f"📅 **Far Lookback:** {man_long} months — {far_start.strftime('%m/%d/%Y')} to {far_end.strftime('%m/%d/%Y')}")
-                            st.markdown(f"📅 **Mid Lookback:** {man_mid} months — {mid_start.strftime('%m/%d/%Y')} to {mid_end.strftime('%m/%d/%Y')}")
-                            st.markdown(f"📅 **Near Lookback:** {man_near} months — {near_start.strftime('%m/%d/%Y')} to {near_end.strftime('%m/%d/%Y')}")
+                                st.markdown(f"📅 **Far Lookback:** {man_long} months — {far_start.strftime('%m/%d/%Y')} to {far_end.strftime('%m/%d/%Y')}")
+                                st.markdown(f"📅 **Mid Lookback:** {man_mid} months — {mid_start.strftime('%m/%d/%Y')} to {mid_end.strftime('%m/%d/%Y')}")
+                                st.markdown(f"📅 **Near Lookback:** {man_near} months — {near_start.strftime('%m/%d/%Y')} to {near_end.strftime('%m/%d/%Y')}")
+                            else:
+                                # Get all unique trading days, sorted
+                                trading_days = sorted(ema_df['OpenDate'].unique())
+
+                                # First trade date for this week
+                                first_trade_date = trades['Date'].min()
+
+                                # Anchor to Monday of the week (start of that trading period)
+                                monday_of_week = first_trade_date - datetime.timedelta(days=first_trade_date.weekday())
+
+                                # Get all trading days strictly before this Monday
+                                prior_trading_days = [d for d in trading_days if d < monday_of_week]
+
+                                # Take the most recent N days before this Monday
+                                recent_trading_days = prior_trading_days[-trend_ranking_days:]
+
+                                # Determine actual start and end used in time trend logic
+                                if recent_trading_days:
+                                    trend_start = recent_trading_days[0]
+                                    trend_end = recent_trading_days[-1]
+                                else:
+                                    trend_start = trend_end = None  # fallback if not enough data
+
+                                if trend_start and trend_end:
+                                    st.markdown(
+                                        f"🔁 **Trend Ranking:** Last {trend_ranking_days} days "
+                                        f"({trend_start.strftime('%Y-%m-%d')} to {trend_end.strftime('%Y-%m-%d')}) | "
+                                        f"{trend_smoothing_days}-day {trend_smoothing_type.upper()}"
+                                    )
+                                else:
+                                    st.markdown("⚠️ Not enough historical trading days for trend analysis.")
+                            
                             st.markdown(f"⏰ **Selected Times:** {selected_times_str}")
                             st.markdown(f"💵 **End Equity:** ${end_equity:,.2f}")
                             
@@ -992,8 +1160,11 @@ with tab1:
 
 # region --- 🎯 Tab 2: Entries Optimization
 # -----------------------------------------------------
-def optimize_num_entries_with_manual_lookbacks(
-    ema_df, num_times_range, equityStart, risk, start_date, end_date, man_near, man_mid, man_long,
+def optimize_num_entries(
+    ema_df, num_times_range, equityStart, risk, start_date, end_date,
+    man_near, man_mid, man_long,
+    average_credit, selection_method,
+    trend_ranking_days, trend_smoothing_days, trend_smoothing_type,
     performance_func
 ):
     """
@@ -1002,7 +1173,7 @@ def optimize_num_entries_with_manual_lookbacks(
     results = []
 
     for num_times in num_times_range:
-        daily_equity_manual, _ = calculate_equity_curve_with_manual_lookbacks(
+        daily_equity_manual, _ = calculate_equity_curve_with_dynamic_method(
             ema_df=ema_df,
             start_date=start_date,
             end_date=end_date,
@@ -1012,7 +1183,11 @@ def optimize_num_entries_with_manual_lookbacks(
             man_near=man_near,
             man_mid=man_mid,
             man_long=man_long,
-            average_credit=average_credit
+            average_credit=average_credit,
+            selection_method=selection_method,  # uses your dropdown
+            trend_ranking_days=trend_ranking_days,
+            trend_smoothing_days=trend_smoothing_days,
+            trend_smoothing_type=trend_smoothing_type
         )
 
         if daily_equity_manual.empty:
@@ -1038,8 +1213,13 @@ def optimize_num_entries_with_manual_lookbacks(
 
 # --- 📈 Cached Optimization Sweep
 @st.cache_data(show_spinner=False)
-def run_num_entries_sweep(ema_df, start_date, end_date, equity_start, risk, man_near, man_mid, man_long):
-    return optimize_num_entries_with_manual_lookbacks(
+def run_num_entries_sweep(
+    ema_df, start_date, end_date, equity_start, risk,
+    man_near, man_mid, man_long,
+    average_credit, selection_method,
+    trend_ranking_days, trend_smoothing_days, trend_smoothing_type
+):
+    return optimize_num_entries(
         ema_df=ema_df,
         num_times_range=num_times_range,
         equityStart=equity_start,
@@ -1049,15 +1229,24 @@ def run_num_entries_sweep(ema_df, start_date, end_date, equity_start, risk, man_
         man_near=man_near,
         man_mid=man_mid,
         man_long=man_long,
+        average_credit=average_credit,
+        selection_method=selection_method,
+        trend_ranking_days=trend_ranking_days,
+        trend_smoothing_days=trend_smoothing_days,
+        trend_smoothing_type=trend_smoothing_type,
         performance_func=calculate_performance_metrics
     )
 
 
 # --- 🎯 Tab 2: Entries Optimization
 with tab2:
+    if selection_method == "Average PCR":
+        lookback_str = f"Average PCR Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
+    else:
+        lookback_str = f"Trend Ranking: Last {trend_ranking_days} days / {trend_smoothing_days}-day {trend_smoothing_type.upper()}"
     st.subheader(f"Entries Optimization Analysis ({start_date.date()} to {end_date.date()})")
     st.markdown(
-        f"##### Target Credit: ${credit_target:.2f} | Risk: {risk:.1f}% | Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
+        f"##### Target Credit: ${credit_target:.2f} | Risk: {risk:.1f}% | {lookback_str}"
     )
 
     # Reserve UI space early
@@ -1081,7 +1270,12 @@ with tab2:
                     risk=risk,
                     man_near=man_near,
                     man_mid=man_mid,
-                    man_long=man_long
+                    man_long=man_long,
+                    average_credit=average_credit,
+                    selection_method=selection_method,
+                    trend_ranking_days=trend_ranking_days,
+                    trend_smoothing_days=trend_smoothing_days,
+                    trend_smoothing_type=trend_smoothing_type
                 )
 
                 if optimization_results.empty:
@@ -1148,14 +1342,18 @@ with tab2:
 
 # --- 📈 Helper: Optimize Risk (with caching)
 @st.cache_data(show_spinner=False)
-def optimize_risk_for_manual_lookbacks_cached(
-    ema_df, num_times, risk_range, step_size, start_date, end_date, equityStart, man_near, man_mid, man_long
+def optimize_risk(
+    ema_df, num_times, risk_range, step_size,
+    start_date, end_date, equityStart,
+    man_near, man_mid, man_long,
+    average_credit, selection_method,
+    trend_ranking_days, trend_smoothing_days, trend_smoothing_type
 ):
     risks = np.arange(risk_range[0], risk_range[1] + step_size, step_size)
     results = []
 
     for risk in risks:
-        daily_equity, _ = calculate_equity_curve_with_manual_lookbacks(
+        daily_equity, _ = calculate_equity_curve_with_dynamic_method(
             ema_df=ema_df,
             start_date=start_date,
             end_date=end_date,
@@ -1165,7 +1363,11 @@ def optimize_risk_for_manual_lookbacks_cached(
             man_near=man_near,
             man_mid=man_mid,
             man_long=man_long,
-            average_credit=average_credit
+            average_credit=average_credit,
+            selection_method=selection_method,
+            trend_ranking_days=trend_ranking_days,
+            trend_smoothing_days=trend_smoothing_days,
+            trend_smoothing_type=trend_smoothing_type
         )
 
         if daily_equity.empty:
@@ -1189,9 +1391,14 @@ def optimize_risk_for_manual_lookbacks_cached(
 
 # --- 📈 Tab 3: Risk Optimization
 with tab3:
+    if selection_method == "Average PCR":
+        lookback_str = f"Average PCR Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
+    else:
+        lookback_str = f"Trend Ranking: Last {trend_ranking_days} days / {trend_smoothing_days}-day {trend_smoothing_type.upper()}"
+
     st.subheader(f"Risk Optimization Analysis ({start_date.date()} to {end_date.date()})")
     st.markdown(
-        f"##### Target Credit: ${credit_target:.2f} | Entries: {num_times} | Lookbacks: Near {man_near}M / Mid {man_mid}M / Long {man_long}M"
+        f"##### Target Credit: ${credit_target:.2f} | Entries: {num_times} | {lookback_str}"
     )
 
     risk_container = st.empty()
@@ -1206,7 +1413,7 @@ with tab3:
                 risk_range = (0.8, 6.0)
                 step_size = 0.2
 
-                optimization_results_risk = optimize_risk_for_manual_lookbacks_cached(
+                optimization_results_risk = optimize_risk(
                     ema_df=ema_df,
                     num_times=num_times,
                     risk_range=risk_range,
@@ -1216,7 +1423,12 @@ with tab3:
                     equityStart=equity_start,
                     man_near=man_near,
                     man_mid=man_mid,
-                    man_long=man_long
+                    man_long=man_long,
+                    average_credit=average_credit,
+                    selection_method=selection_method,
+                    trend_ranking_days=trend_ranking_days,
+                    trend_smoothing_days=trend_smoothing_days,
+                    trend_smoothing_type=trend_smoothing_type
                 )
 
                 if optimization_results_risk.empty:
@@ -1517,7 +1729,8 @@ def plot_slot_equity_curves_plotly(
     smoothing_type='SMA',
     selected_times=None,
     columns=2,
-    lookback_end=None
+    lookback_end=None,
+    highlight_times=None
 ):
     """
     Plot cumulative PnL and rolling average for each entry time using Plotly.
@@ -1561,6 +1774,10 @@ def plot_slot_equity_curves_plotly(
     else:
         rolling_avg = cumulative_pnl.rolling(window=smoothing_window, min_periods=1).mean()
 
+    # --- Get latest values for cumulative and smoothed lines
+    latest_cum = cumulative_pnl.iloc[-1]
+    latest_smooth = rolling_avg.iloc[-1]
+
     # --- Summarize Win Rate and PCR
     summary_stats = ema_df[
         ema_df['OpenDate'].isin(recent_dates)
@@ -1578,13 +1795,28 @@ def plot_slot_equity_curves_plotly(
     num_slots = len(pivot.columns)
     rows = (num_slots + columns - 1) // columns
 
+    # Build chart titles separately first
+    subplot_titles = []
+    for slot in pivot.columns:
+        check = " ✅" if highlight_times and slot in highlight_times else ""
+        win = summary_stats.loc[slot, 'WinRate'] if slot in summary_stats.index else None
+        pcr = summary_stats.loc[slot, 'PCR'] if slot in summary_stats.index else None
+        cum = latest_cum[slot] * 5 if slot in latest_cum else None
+        avg = latest_smooth[slot] * 5 if slot in latest_smooth else None
+
+        title = f"{slot}{check}"
+
+        if win is not None and pcr is not None:
+            title += f" | Win: {win:.1f}% | PCR: {pcr:.1f}%"
+        if cum is not None and avg is not None:
+            title += f" | PnL: ${cum:,.0f} | {smoothing_type.upper()}: ${avg:,.0f}"
+
+        subplot_titles.append(title)
+
+    # Now create subplots using the generated titles
     fig = make_subplots(
         rows=rows, cols=columns,
-        subplot_titles=[
-            f"{slot} | Win: {summary_stats.loc[slot, 'WinRate']:.1f}% | PCR: {summary_stats.loc[slot, 'PCR']:.1f}%"
-            if slot in summary_stats.index else f"{slot}"
-            for slot in pivot.columns
-        ]
+        subplot_titles=subplot_titles
     )
 
     # --- Add Cumulative and Rolling lines per slot
@@ -1594,7 +1826,7 @@ def plot_slot_equity_curves_plotly(
 
         fig.add_trace(
             go.Scatter(
-                x=cumulative_pnl.index, y=cumulative_pnl[slot] * 100,
+                x=cumulative_pnl.index, y=cumulative_pnl[slot] * 5,
                 mode='lines', name=f'{slot} Cumulative',
                 line=dict(width=2, color="#6d6af3"),  # <<<<< Fixed color (adjust if you want)
                 hovertemplate='%{x|%Y-%m-%d}<br>$%{y:.0f}<extra></extra>'
@@ -1605,9 +1837,9 @@ def plot_slot_equity_curves_plotly(
         # --- Rolling Average Line
         fig.add_trace(
             go.Scatter(
-                x=rolling_avg.index, y=rolling_avg[slot] * 100,
+                x=rolling_avg.index, y=rolling_avg[slot] * 5,
                 mode='lines', name=f'{slot} Rolling',
-                line=dict(width=1.5, dash='dash', color='gray'),  # <<<<< Rolling line gray
+                line=dict(width=1.0, color='gray'),  # <<<<< Rolling line gray
                 hovertemplate='$%{y:.0f}<extra></extra><br>%{x|%Y-%m-%d}'
             ),
             row=r, col=c
@@ -1625,20 +1857,101 @@ def plot_slot_equity_curves_plotly(
 
 with tab5:
     st.subheader("Entry Time Trends")
-    # --- 📈 User Controls for Slot Equity Curves
-    col1, col2, col3 = st.columns([2, 2, 1])
 
-    with col1:
-        ranking_window = st.slider("Analysis Lookback Days", min_value=30, max_value=365, value=120)
+    # --- Input Header Row Layout
+    trend_col1, trend_col2, trend_col3 = st.columns([2, 2, 1])
 
-    with col2:
-        smoothing_window = st.slider("Smoothing Window (Days)", min_value=5, max_value=60, value=20)
+    with trend_col1:
+        max_available_date = ema_df['OpenDate'].max().date()
+        future_limit = max_available_date + datetime.timedelta(days=7)
+        days_until_next_monday = (7 - max_available_date.weekday()) % 7
+        default_trend_date = max_available_date + datetime.timedelta(days=days_until_next_monday or 7)
 
-    with col3:
-        smoothing_type = st.selectbox("Smoothing Type", options=["SMA", "EMA"], index=0)
+        trend_check_date = st.date_input(
+            "Select Date to Inspect (Entry Times from that Week)",
+            value=default_trend_date,
+            min_value=ema_df['OpenDate'].min().date(),
+            max_value=future_limit
+        )
 
-    # --- 📈 Create Daily PnL per Slot
-    ema_df['DailyPnL'] = ema_df['PremiumCapture']  # Already per-contract
+    with trend_col2:
+        timezone = st.selectbox(
+            "Display Timezone",
+            options=["US/Eastern", "US/Central", "US/Mountain", "US/Pacific"],
+            index=1
+        )
+
+    with trend_col3:
+        st.markdown("###### ")  # <-- pushes toggle downward for alignment
+        show_all_times = st.toggle(
+            "Show All Entry Times",
+            value=False,
+            help="If enabled, all entry time graphs will be shown. Otherwise, only selected times will be displayed."
+        )
+
+    # --- Compute Monday of selected week
+    monday = pd.to_datetime(trend_check_date) - pd.Timedelta(days=trend_check_date.weekday())
+
+    # --- Calculate trend date range (rolling N trading days before Monday)
+    trading_days = sorted(ema_df['OpenDate'].unique())
+    prior_trading_days = [d for d in trading_days if d < monday]
+    recent_trading_days = prior_trading_days[-trend_ranking_days:]
+
+    if recent_trading_days:
+        trend_start = recent_trading_days[0]
+        trend_end = recent_trading_days[-1]
+    else:
+        trend_start = trend_end = None
+
+    # --- Select times using Time Trend method for this week
+    selected_times_trend = select_times_via_time_trends(
+        ema_df=ema_df,
+        end_date=monday,
+        num_times=num_times,
+        ranking_window=trend_ranking_days,
+        smoothing_window=trend_smoothing_days,
+        smoothing_type=trend_smoothing_type
+    )
+
+    # --- Local Time conversion
+    def convert_to_local(open_times, timezone_str):
+        offset = {
+            'US/Eastern': 0,
+            'US/Central': -1,
+            'US/Mountain': -2,
+            'US/Pacific': -3
+        }.get(timezone_str, -1)
+
+        local_times = []
+        for t in open_times:
+            dt = pd.to_datetime(t, format='%H:%M', errors='coerce')
+            dt_local = (dt + pd.to_timedelta(offset, unit='h')).strftime('%I:%M %p')
+            local_times.append(dt_local)
+        return local_times
+
+    local_times = convert_to_local(selected_times_trend, timezone)
+
+    # --- Display Trend Range and Times
+    if trend_start and trend_end:
+        time_col1, time_col2 = st.columns([1.13, 1])
+
+        with time_col1:
+            st.markdown("#### Selected Times")
+            top_row = ', '.join(selected_times_trend)
+            bottom_row = ', '.join(local_times)
+            st.markdown(f"{top_row}")
+            st.markdown(f"{bottom_row}")
+
+        with time_col2:
+            st.markdown("#### Trend Ranking Range")
+            st.markdown(
+                f"{trend_start.strftime('%Y-%m-%d')} to {trend_end.strftime('%Y-%m-%d')} "
+                f"({trend_ranking_days} trading days)"
+            )
+
+
+    # --- Create Daily PnL per Slot
+    ema_df['DailyPnL'] = ema_df['PremiumCapture']
 
     daily_slot_pnl = (
         ema_df
@@ -1646,15 +1959,17 @@ with tab5:
         .agg({'DailyPnL': 'sum'})
     )
 
+    # --- Plot all entry slots, highlight selected
     plot_slot_equity_curves_plotly(
         daily_slot_pnl=daily_slot_pnl,
         ema_df=ema_df,
-        ranking_window=ranking_window,
-        smoothing_window=smoothing_window,
-        smoothing_type=smoothing_type,
-        selected_times=None,
+        ranking_window=trend_ranking_days,
+        smoothing_window=trend_smoothing_days,
+        smoothing_type=trend_smoothing_type,
+        selected_times=selected_times_trend if not show_all_times else None,
         columns=2,
-        lookback_end=pd.to_datetime(end_date)
+        lookback_end=monday,  # ✅ Use the dropdown-driven Monday
+        highlight_times=selected_times_trend
     )
 
 # endregion
@@ -1674,7 +1989,6 @@ def test_lookback_stability_with_overlap_cached(
 
     results = []
 
-    # --- ✅ Pre-filter valid lookback combinations
     lookback_combinations = [
         (near, mid, long)
         for near, mid, long in product(near_range, mid_range, long_range)
@@ -1685,7 +1999,7 @@ def test_lookback_stability_with_overlap_cached(
         for start_date, end_date in rolling_windows:
             for man_near, man_mid, man_long in lookback_combinations:
 
-                daily_equity, _ = calculate_equity_curve_with_manual_lookbacks(
+                daily_equity, _ = calculate_equity_curve_with_dynamic_method(
                     ema_df=ema_df,
                     start_date=start_date,
                     end_date=end_date,
@@ -1695,7 +2009,11 @@ def test_lookback_stability_with_overlap_cached(
                     man_near=man_near,
                     man_mid=man_mid,
                     man_long=man_long,
-                    average_credit=average_credit
+                    average_credit=average_credit,
+                    selection_method="Average PCR",  # ✅ Use the PCR logic
+                    trend_ranking_days=None,
+                    trend_smoothing_days=None,
+                    trend_smoothing_type=None
                 )
 
                 if daily_equity.empty:
@@ -1718,21 +2036,20 @@ def test_lookback_stability_with_overlap_cached(
     if results_df.empty:
         return pd.DataFrame(columns=['Near', 'Mid', 'Long', 'Stability Score'])
 
-    # --- 📊 Compute Rankings
-    results_df['Rank'] = results_df.groupby(['Start', 'End', 'NumEntries'])['CAGR'].rank(ascending=False, method="dense")
+    results_df['Rank'] = results_df.groupby(['Start', 'End', 'NumEntries'])['CAGR'].rank(
+        ascending=False, method="dense"
+    )
 
-    # --- 📈 Calculate Stability Score
     stability_scores = (
         results_df.groupby(['Near', 'Mid', 'Long'])['Rank']
         .mean()
         .reset_index()
         .rename(columns={'Rank': 'Stability Score'})
+        .sort_values(by='Stability Score')
+        .round(2)
     )
 
-    # --- ✅ Round Stability Score for nicer display
-    stability_scores['Stability Score'] = stability_scores['Stability Score'].round(2)
-
-    return stability_scores.sort_values(by='Stability Score')
+    return stability_scores
 
 
 with tab6:
@@ -1764,20 +2081,15 @@ with tab6:
             mid_min, mid_max = st.slider("Mid Lookback Range (Months)", 1, 12, (5, 9))
             long_min, long_max = st.slider("Long Lookback Range (Months)", 1, 12, (9, 12))
 
-        # Button stays above progress/results
         run_button = st.button("🚀 Run Stability Test")
-
-        # Reserve container for both progress and results
         results_container = st.empty()
 
         if run_button:
             start_time = time.time()
 
             with results_container.container():
-                # Progress bar starts first, inside results container
                 progress_bar = st.progress(0, text="🔍 Running stability optimization...")
 
-                # Prep ranges and params
                 entry_range = range(entry_min, entry_max + 1)
                 near_range = range(near_min, near_max + 1)
                 mid_range = range(mid_min, mid_max + 1)
@@ -1795,15 +2107,15 @@ with tab6:
                     for near, mid, long in product(near_range, mid_range, long_range)
                     if near <= mid <= long
                 ]
+
                 total_tests = len(entry_range) * len(rolling_windows) * len(lookback_combinations)
                 completed_tests = 0
                 results = []
 
-                # Main test loop
                 for num_times in entry_range:
                     for start_date, end_date in rolling_windows:
                         for man_near, man_mid, man_long in lookback_combinations:
-                            daily_equity, _ = calculate_equity_curve_with_manual_lookbacks(
+                            daily_equity, _ = calculate_equity_curve_with_dynamic_method(
                                 ema_df=ema_df,
                                 start_date=start_date,
                                 end_date=end_date,
@@ -1813,7 +2125,11 @@ with tab6:
                                 man_near=man_near,
                                 man_mid=man_mid,
                                 man_long=man_long,
-                                average_credit=average_credit
+                                average_credit=average_credit,
+                                selection_method="Average PCR",
+                                trend_ranking_days=None,
+                                trend_smoothing_days=None,
+                                trend_smoothing_type=None
                             )
 
                             if not daily_equity.empty:
@@ -1852,11 +2168,8 @@ with tab6:
                 else:
                     stability_df = pd.DataFrame()
 
-                # Finalize
                 end_time = time.time()
                 minutes, seconds = divmod(int(end_time - start_time), 60)
-
-                # Optional: hide progress bar after complete
                 progress_bar.empty()
 
                 if not stability_df.empty:
@@ -1892,11 +2205,124 @@ with tab6:
 #endregion
 
 
-# region --- 📖 Tab 7: Documenation
+# region --- 🔁 Tab 7: Trend Stability Optimization
 # -----------------------------------------------------
-# --- 📖 Tab 7: Documentation
-# -----------------------------------------------------
+def run_trend_stability_test_generator(
+    ema_df, entry_range, risk, equity_start,
+    ranking_windows, smoothing_windows, smoothing_types, rolling_windows
+):
+    from itertools import product
+
+    results = []
+    combinations = list(product(ranking_windows, smoothing_windows, smoothing_types))
+
+    total_tests = len(entry_range) * len(rolling_windows) * len(combinations)
+    completed = 0
+
+    for num_times in entry_range:
+        for start_date, end_date in rolling_windows:
+            for rank_win, smooth_win, smooth_type in combinations:
+                daily_equity, _ = calculate_equity_curve_with_dynamic_method(
+                    ema_df=ema_df,
+                    start_date=start_date,
+                    end_date=end_date,
+                    equityStart=equity_start,
+                    risk=risk,
+                    num_times=num_times,
+                    man_near=None, man_mid=None, man_long=None,
+                    average_credit=average_credit,
+                    selection_method="Time Trends",
+                    trend_ranking_days=rank_win,
+                    trend_smoothing_days=smooth_win,
+                    trend_smoothing_type=smooth_type
+                )
+
+                if not daily_equity.empty:
+                    cagr, _, _ = calculate_performance_metrics(daily_equity)
+                    results.append({
+                        'RankingWindow': rank_win,
+                        'SmoothingWindow': smooth_win,
+                        'SmoothingType': smooth_type,
+                        'NumEntries': num_times,
+                        'Start': start_date,
+                        'End': end_date,
+                        'CAGR': cagr
+                    })
+
+                completed += 1
+                yield completed, total_tests, results
+
 with tab7:
+    st.subheader("Trend Stability Optimization")
+
+    if ema_df.empty:
+        st.warning("⚠️ No data available.")
+    else:
+        st.markdown("##### Stability Test Settings")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            lastDay_default = ema_df['OpenDate'].max().date()
+            lastDay = st.date_input("Select Last Day for Analysis", value=lastDay_default)
+            entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (8, 13))
+        with col2:
+            rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (120, 180), step = 10)
+            smooth_min, smooth_max = st.slider("Smoothing Window Range", 5, 60, (5, 10), step = 1)
+            smooth_types = st.multiselect("Smoothing Types", options=["SMA", "EMA"], default=["SMA", "EMA"])
+
+        if st.button("🚀 Run Trend Stability Optimization"):
+            progress_container = st.empty()
+            result_container = st.empty()
+
+            entry_range = range(entry_min, entry_max + 1)
+            ranking_windows = range(rank_min, rank_max + 1, 10)
+            smoothing_windows = range(smooth_min, smooth_max + 1, 5)
+
+            lastDay_dt = pd.to_datetime(lastDay)
+            rolling_windows = [
+                (lastDay_dt - relativedelta(months=18), lastDay_dt),
+                (lastDay_dt - relativedelta(months=12), lastDay_dt),
+                (lastDay_dt - relativedelta(months=6), lastDay_dt)
+            ]
+
+            all_results = []
+            with progress_container.container():
+                progress = st.progress(0, text="🔍 Running trend stability optimization...")
+                for completed, total, batch_results in run_trend_stability_test_generator(
+                    ema_df, entry_range, risk, equity_start,
+                    ranking_windows, smoothing_windows, smooth_types,
+                    rolling_windows
+                ):
+                    all_results = batch_results
+                    progress.progress(completed / total, text=f"🔍 {completed:,}/{total:,} combinations tested...")
+
+            df = pd.DataFrame(all_results)
+
+            if df.empty:
+                st.warning("⚠️ No stable results found.")
+            else:
+                df['Rank'] = df.groupby(['Start', 'End', 'NumEntries'])['CAGR'].rank(ascending=False, method="dense")
+
+                summary = (
+                    df.groupby(['RankingWindow', 'SmoothingWindow', 'SmoothingType'])['Rank']
+                    .mean()
+                    .reset_index()
+                    .rename(columns={'Rank': 'Stability Score'})
+                    .sort_values('Stability Score')
+                    .round(2)
+                )
+
+                st.success("✅ Stability optimization complete.")
+                st.markdown("Top Results:")
+
+                st.dataframe(summary.head(20), use_container_width=True, height=735)
+# endregion
+
+# region --- 📖 Tab 8: Documenation
+# -----------------------------------------------------
+# --- 📖 Tab 8: Documentation
+# -----------------------------------------------------
+with tab8:
     st.subheader("📖 Instructions and Strategy Assumptions")
 
     try:
