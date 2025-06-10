@@ -551,7 +551,7 @@ def calculate_equity_curve_with_dynamic_method(
         elif selection_method == "Time Trends":
             top_times_sorted = select_times_via_time_trends(
                 ema_df=ema_df,
-                end_date=current_period,
+                end_date=current_period - pd.Timedelta(days=1),
                 num_times=num_times,
                 ranking_window=trend_ranking_days,
                 smoothing_window=trend_smoothing_days,
@@ -1906,7 +1906,7 @@ with tab5:
     # --- Select times using Time Trend method for this week
     selected_times_trend = select_times_via_time_trends(
         ema_df=ema_df,
-        end_date=monday,
+        end_date=monday - pd.Timedelta(days=1),
         num_times=num_times,
         ranking_window=trend_ranking_days,
         smoothing_window=trend_smoothing_days,
@@ -1960,6 +1960,10 @@ with tab5:
     )
 
     # --- Plot all entry slots, highlight selected
+    # Calculate Monday of selected week
+    trend_check_date = pd.to_datetime(trend_check_date)
+    trend_check_monday = trend_check_date - pd.Timedelta(days=trend_check_date.weekday())
+
     plot_slot_equity_curves_plotly(
         daily_slot_pnl=daily_slot_pnl,
         ema_df=ema_df,
@@ -1968,8 +1972,8 @@ with tab5:
         smoothing_type=trend_smoothing_type,
         selected_times=selected_times_trend if not show_all_times else None,
         columns=2,
-        lookback_end=monday,  # ✅ Use the dropdown-driven Monday
-        highlight_times=selected_times_trend
+        lookback_end=trend_check_monday - pd.Timedelta(days=1),  # ✅ Prevents lookahead
+        highlight_times=selected_times_trend  # if applicable
     )
 
 # endregion
@@ -2266,9 +2270,9 @@ with tab7:
             lastDay = st.date_input("Select Last Day for Analysis", value=lastDay_default)
             entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (8, 13))
         with col2:
-            rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (120, 180), step = 10)
-            smooth_min, smooth_max = st.slider("Smoothing Window Range", 5, 60, (5, 10), step = 1)
-            smooth_types = st.multiselect("Smoothing Types", options=["SMA", "EMA"], default=["SMA", "EMA"])
+            rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (90, 160), step = 10)
+            smooth_min, smooth_max = st.slider("Smoothing Window Range", 5, 60, (5, 20), step = 5)
+            smooth_types = st.multiselect("Smoothing Types", options=["SMA", "EMA"], default=["SMA"])
 
         if st.button("🚀 Run Trend Stability Optimization"):
             progress_container = st.empty()
