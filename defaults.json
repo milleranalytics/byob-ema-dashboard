@@ -9,5 +9,5 @@
   "trend_ranking_days": 120,
   "trend_smoothing_days": 10,
   "trend_smoothing_type": "SMA",
-  "selection_method": "Time Trends"
+  "selection_method": "Time Trends (Weekly)"
 }
