@@ -15,23 +15,26 @@ Welcome to the BYOB EMA Trading Dashboard — a private research tool designed t
 3. **Set Number of Entries per Day**
    - Choose how many entry times to enter each day.  The total number of contracts per tranche will be calculated based on your risk and the number of entries per day so that your total daily credit target remains consistent. 
 
-4. **Define Lookback Periods**
-   - *Near*, *Mid*, and *Long* lookback windows (in months) are used to rank the best entry times.
-   - These should ideally be selected based on stability testing (see Lookback Optimization).
+4. **Choose Entry Time Selection Method**
+   - Two models are supported:
+      - *Time Trends (default)*: Uses a trend-following filter on individual entry times, ranking them by cumulative PnL and filtering below a moving average.  New times are selected each Monday. This allows the system to adapt to weekly shifting markets.
+      - *Average PCR*: Ranks times based on average Premium Capture Rate across selected lookback windows (Near, Mid, Long) in months.
+   - The Equity Curve, Entries Optimization and Risk Optimization Tabs reflect the selected entry method.
 
 5. **Explore Tabs for Analysis**
    - **Tab 1: Equity Curve and Drawdown** — View an equity curve, the main performance metrics, as well as a table of monthly performance history for the variables that were chosen above.  This tab also has some confirmation checks so you can see inside the backtest data to confirm the entry times chosen in the backtest match with what you expect them to be.
    - **Tab 2: Entries Optimization** — Explore how performance metrics vary by number of daily entries.
    - **Tab 3: Risk Optimization** — Explore how performance metrics vary by daily risk percentage.
-   - **Tab 4: Entry Time PCR Analysis** — Audit best entry times for the next trading day based on current lookbacks. Run this on the 1st of each month and leave static for the entire month to match the way the equity curve is calculated. Going up and down number of entries mid-month is expected as account grows and shrinks.  You can manually choose the date to run this analysis as well, which allows you to double check the bascktest historical logic.
-   - **Tab 5: Entry Time Trends** — Track rolling equity trends of individual entry times for discretionary overlay.
-   - **Tab 6: Lookback Stability Optimization** — Re-optimize for the most stable lookback periods each month to maintain robustness. While this level of optimization is great for a rolling-window approach in future trading, this part of the strategy does allow some lookahead bias to creep into the backtest results.  The hope is that by testing over a wide variety of lookbacks and number of entries, it won't be hyper-optimized for the best results but find something that has been stable and will continue to be stable.
+   - **Tab 4: Entry Time Trends** — Track rolling equity trends of individual entry times for discretionary overlay. Audit the chosen trading times for a given trading day when using the Time Trend entry method. Use this tab before trading each Monday to select your times for the week.
+   - **Tab 5: Entry Time Avg PCR** — Audit best entry times for the next trading day based on current lookbacks for the Average PCR entry method. Run this on the 1st of each month and leave static for the entire month to match the way the equity curve is calculated. Going up and down number of entries mid-month is expected as account grows and shrinks.  You can manually choose the date to run this analysis as well, which allows you to double check the bascktest historical logic.
+   - **Tab 6: Time Trend Optimization** — Re-optimize for the most stable lookback days and moving average smoothing periods.
+   - **Tab 7: Lookback Stability Optimization** — Re-optimize for the most stable lookback periods each month to maintain robustness. While this level of optimization is great for a rolling-window approach in future trading, this part of the strategy does allow some lookahead bias to creep into the backtest results.  The hope is that by testing over a wide variety of lookbacks and number of entries, it won't be hyper-optimized for the best results but find something that has been stable and will continue to be stable.
 
 ---
 
 ### 📜 Strategy Philosophy
 
-The BYOB EMA Dashboard is designed to help guide systematic monthly trading decisions without relying on lookahead bias or overfitting. Rather than optimizing for the highest possible backtest result, the workflow emphasizes *stability* across different entry counts, lookback periods, and time windows. Credit targets are reviewed monthly to stay responsive to changing market dynamics. Entry times are carefully balanced between diversification and maintaining an edge. Lookbacks are selected through rigorous multi-window stability testing. The goal is to create a durable, walk-forward research framework that favors robust consistency over fragile perfection — building confidence that results will generalize into live trading conditions.
+The BYOB EMA Dashboard is designed to help guide systematic monthly trading decisions without relying on lookahead bias or overfitting. Rather than optimizing for the highest possible backtest result, the workflow emphasizes *stability* across different entry counts, lookback periods, and time windows. Credit targets are reviewed monthly to stay responsive to changing market dynamics. Entry times are carefully balanced between diversification and maintaining an edge. Lookbacks and variables are selected through rigorous multi-window stability testing. The goal is to create a durable, walk-forward research framework that favors robust consistency over fragile perfection — building confidence that results will generalize into live trading conditions.
 
 ---
 
@@ -60,7 +63,7 @@ The BYOB EMA Dashboard is designed to help guide systematic monthly trading deci
   - Re-run the app to reflect the updated data.
 
 - **Lookback Stability Testing**  
-  - At the beginning of each month, the system re-optimizes the **lookback periods** used for entry timing.
+  - At the beginning of each month, the re-optimize the **lookback periods** or **Time Trend Variables** used for entry timing.
   - **Rolling windows include:**
     - Last **18 months**
     - Last **12 months**

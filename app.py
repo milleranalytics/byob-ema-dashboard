@@ -115,8 +115,8 @@ with col1:
     )
     selection_method = st.selectbox(
         "Entry Time Selection Method",
-        options=["Average PCR", "Time Trends"],
-        index=1,
+        options=["Time Trends", "Average PCR"],
+        index=0,
         help="Choose how entry times are selected each period. 'Average PCR' uses a 3-tiered lookback. 'Time Trends' uses cumulative performance with trend filtering."
     )
 
@@ -784,10 +784,10 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📈 Equity Curve",
     "🔎 Entries Optimization",
     "🔎 Risk Optimization",
-    "🎯 Entry Time PCR",
     "📈 Entry Time Trends",
-    "🔎 Lookback Optimization",
-    "🔎 Trend Optimization",
+    "🎯 Entry Time Avg PCR",
+    "🔎 Time Trend Optimization",
+    "🔎 Avg PCR Optimization",
     "📖 Instructions"
 ])
 # endregion
@@ -1488,237 +1488,7 @@ with tab3:
 
 # endregion
 
-
-# region --- 🎯 Tab 4: Entry Time PCR
-# -----------------------------------------------------
-def create_time_pcr_table(df, selected_times=None, timezone='US/Central', is_dark=True):
-
-    # --- Dark/Light mode setup
-    cmap = matplotlib.colormaps['RdYlGn']
-    cell_fill = 'rgba(30,30,30,1)' if is_dark else 'rgba(245,245,245,1)'
-    header_fill = 'rgba(50,50,50,1)' if is_dark else 'rgba(230,230,230,1)'
-    header_font_color = 'white' if is_dark else 'black'
-
-    # --- Correct Local Time
-    local_offset = {
-        'US/Eastern': 0,
-        'US/Central': -1,
-        'US/Mountain': -2,
-        'US/Pacific': -3
-    }.get(timezone, -1)
-
-    df = df.copy()
-    df['LocalTime'] = pd.to_datetime(df['OpenTime'], format='%H:%M', errors='coerce')
-    df['LocalTime'] = df['LocalTime'] + pd.to_timedelta(local_offset, unit='h')
-    df['LocalTime'] = df['LocalTime'].dt.strftime('%I:%M %p')
-
-
-    # --- Selected Times Column
-    if selected_times is not None:
-        df['Selected'] = df['OpenTime'].isin(selected_times).map({True: '✅', False: ''})
-    else:
-        df['Selected'] = ''
-
-    # --- Insert Gaps for spacing
-    gap = [""] * len(df)
-    df.insert(4, 'Gap1', gap)
-    df.insert(7, 'Gap2', gap)
-    df.insert(10, 'Gap3', gap)
-
-    # --- Final Column Order
-    columns_order = [
-        'LocalTime', 'OpenTime',
-        'Far_Premium', 'Far_PCR', 'Gap1',
-        'Mid_Premium', 'Mid_PCR', 'Gap2',
-        'Near_Premium', 'Near_PCR', 'Gap3',
-        'Avg_Premium', 'Avg_PCR', 'Selected'
-    ]
-    df = df[columns_order]
-
-    # --- Format Premium/PCR Columns
-    for col in df.columns:
-        if '_Premium' in col:
-            df[col] = df[col].map('${:,.2f}'.format)
-        elif '_PCR' in col:
-            df[col] = df[col].astype(float).round(1).astype(str) + '%'
-
-    # --- Add AVG Row
-    avg_row = {}
-    for col in df.columns:
-        if '_Premium' in col or '_PCR' in col:
-            clean_col = df[col].replace(r'[\$,%,]', '', regex=True).astype(float)
-            avg_val = clean_col.mean()
-            if '_Premium' in col:
-                avg_row[col] = f"${avg_val:.2f}"
-            elif '_PCR' in col:
-                avg_row[col] = f"{avg_val:.1f}%"
-        else:
-            avg_row[col] = 'AVG' if col == 'LocalTime' else ''
-
-    df = pd.concat([df, pd.DataFrame([avg_row])], ignore_index=True)
-
-    # --- Background shading
-    cell_colors = []
-    for col in df.columns:
-        if '_Premium' in col or '_PCR' in col:
-            clean_col = df[col].replace(r'[\$,%,]', '', regex=True).astype(float)
-            if clean_col.max() == clean_col.min():
-                norm_col = np.zeros_like(clean_col)
-            else:
-                norm = mcolors.Normalize(vmin=clean_col.min(), vmax=clean_col.max())
-                norm_col = norm(clean_col)
-
-            backgrounds = []
-            for idx, val in enumerate(norm_col):
-                if idx == len(df) - 1:  # AVG row
-                    backgrounds.append(header_fill)
-                else:
-                    rgba = cmap(val)
-                    backgrounds.append(f'rgba({int(rgba[0]*255)}, {int(rgba[1]*255)}, {int(rgba[2]*255)}, 0.5)')
-            cell_colors.append(backgrounds)
-        else:
-            backgrounds = [header_fill if idx == len(df) - 1 else cell_fill for idx in range(len(df))]
-            cell_colors.append(backgrounds)
-
-    # --- Build Table
-    fig = go.Figure(data=[go.Table(
-        columnwidth=[80, 80, 80, 80, 10, 80, 80, 10, 80, 80, 10, 80, 80, 50],
-        header=dict(
-            values=[col if not col.startswith('Gap') else '' for col in df.columns],
-            fill_color=header_fill,
-            align='center',
-            font=dict(color=header_font_color, size=14)
-        ),
-        cells=dict(
-            values=[df[col] for col in df.columns],
-            fill_color=cell_colors,
-            align='center',
-            font=dict(color=header_font_color, size=14),
-            height=30
-        )
-    )])
-
-    fig.update_layout(
-        margin=dict(l=0, r=0, t=10, b=0),
-        height=800
-    )
-
-    st.plotly_chart(fig, use_container_width=True)
-
-
-with tab4:
-
-    st.subheader(f"Entry Time PCR Analysis")
-
-    if ema_df.empty:
-        st.warning("⚠️ No data available.")
-    else:
-        min_date = ema_df['OpenDate'].min().date()
-        max_date = ema_df['OpenDate'].max().date()
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            next_trading_day = st.date_input(
-                "Next Trading Day to Simulate",
-                value=max_date + datetime.timedelta(days=1),
-                min_value=min_date,
-                max_value=max_date + datetime.timedelta(days=1)
-            )
-
-        with col2:
-            timezone = st.selectbox(
-                "Display Timezone for Local Time",
-                options=["US/Eastern", "US/Central", "US/Mountain", "US/Pacific"],
-                index=1  # Central default
-            )
-
-        # --- ✅ Define lookback calculator and dictionary BEFORE using it
-        def calculate_lookback_range(base_date, months_back):
-            base = pd.to_datetime(base_date)
-            start = base - pd.DateOffset(months=months_back)
-            end = base - pd.Timedelta(days=1)
-            return start, end
-
-        lookbacks = {
-            'Far': man_long,
-            'Mid': man_mid,
-            'Near': man_near
-        }
-
-        # --- 📈 Build Lookback Tables
-        lookback_tables = {}
-
-        for label, months in lookbacks.items():
-            lb_start, lb_end = calculate_lookback_range(next_trading_day, months)
-
-            mask = (ema_df['OpenDate'] >= lb_start) & (ema_df['OpenDate'] <= lb_end)
-            df = ema_df.loc[mask]
-
-            if df.empty:
-                st.warning(f"⚠️ No data found for {label} Lookback ({lb_start.date()} to {lb_end.date()})")
-                continue
-
-            pcr_table = df.groupby('OpenTimeFormatted').agg({
-                'PremiumCapture': 'mean',
-                'PCR': 'mean'
-            }).reset_index()
-
-            pcr_table.rename(columns={"OpenTimeFormatted": "OpenTime"}, inplace=True)
-            lookback_tables[label] = pcr_table
-
-        # --- 📈 Merge Lookbacks into Combined Table
-        if lookback_tables:
-            combined = lookback_tables['Far'].copy()
-            combined = combined.rename(columns={"PremiumCapture": "Far_Premium", "PCR": "Far_PCR"})
-            combined = combined.merge(
-                lookback_tables['Mid'].rename(columns={"PremiumCapture": "Mid_Premium", "PCR": "Mid_PCR"}),
-                on="OpenTime", how="outer")
-            combined = combined.merge(
-                lookback_tables['Near'].rename(columns={"PremiumCapture": "Near_Premium", "PCR": "Near_PCR"}),
-                on="OpenTime", how="outer")
-
-            # --- Calculate Average
-            combined['Avg_Premium'] = combined[['Far_Premium', 'Mid_Premium', 'Near_Premium']].mean(axis=1)
-            combined['Avg_PCR'] = combined[['Far_PCR', 'Mid_PCR', 'Near_PCR']].mean(axis=1)
-
-            # --- Multiply PCR to %
-            for col in ['Far_PCR', 'Mid_PCR', 'Near_PCR', 'Avg_PCR']:
-                combined[col] = combined[col] * 100
-
-            # --- Select Top N Times
-            top_times = combined.sort_values(by='Avg_PCR', ascending=False).head(num_times)['OpenTime'].tolist()
-
-            # --- Create Final Table
-            create_time_pcr_table(combined, selected_times=top_times, timezone=timezone, is_dark=True)
-
-        # --- 📅 Lookback Ranges and Selected Times side-by-side
-        left_col, right_col = st.columns(2)
-
-        with left_col:
-            st.markdown("#### Lookback Date Ranges Used")
-            for label, months in lookbacks.items():
-                lb_start, lb_end = calculate_lookback_range(next_trading_day, months)
-                st.markdown(
-                    f"**{label} Lookback:** {months} months — {lb_start.strftime('%m/%d/%Y')} to {lb_end.strftime('%m/%d/%Y')}"
-                )
-
-        with right_col:
-            st.markdown("#### Selected Times")
-
-            top_times_sorted = sorted(top_times) if top_times else []
-
-            if top_times_sorted:
-                # Join all times into a single line, comma separated
-                selected_times_str = ', '.join(top_times_sorted)
-                st.markdown(f"**{selected_times_str}**")
-            else:
-                st.markdown("No times selected.")
-
-# endregion
-
-
-# region --- 📈 Tab 5: Entry Time Trends
+# region --- 📈 Tab 4: Entry Time Trends Visualization
 # -----------------------------------------------------
 # --- 📈 Full Slot Equity Curve Visualization Function
 def plot_slot_equity_curves_plotly(
@@ -1855,7 +1625,7 @@ def plot_slot_equity_curves_plotly(
     st.plotly_chart(fig, use_container_width=True)
 
 
-with tab5:
+with tab4:
     st.subheader("Entry Time Trends")
 
     # --- Input Header Row Layout
@@ -1948,6 +1718,9 @@ with tab5:
                 f"{trend_start.strftime('%Y-%m-%d')} to {trend_end.strftime('%Y-%m-%d')} "
                 f"({trend_ranking_days} trading days)"
             )
+            st.markdown(
+                f"{trend_smoothing_days}-day {trend_smoothing_type.upper()} smoothing"
+            )
 
 
     # --- Create Daily PnL per Slot
@@ -1977,11 +1750,354 @@ with tab5:
     )
 
 # endregion
+
+
+# region --- 🎯 Tab 5: Entry Time PCR
+# -----------------------------------------------------
+def create_time_pcr_table(df, selected_times=None, timezone='US/Central', is_dark=True):
+
+    # --- Dark/Light mode setup
+    cmap = matplotlib.colormaps['RdYlGn']
+    cell_fill = 'rgba(30,30,30,1)' if is_dark else 'rgba(245,245,245,1)'
+    header_fill = 'rgba(50,50,50,1)' if is_dark else 'rgba(230,230,230,1)'
+    header_font_color = 'white' if is_dark else 'black'
+
+    # --- Correct Local Time
+    local_offset = {
+        'US/Eastern': 0,
+        'US/Central': -1,
+        'US/Mountain': -2,
+        'US/Pacific': -3
+    }.get(timezone, -1)
+
+    df = df.copy()
+    df['LocalTime'] = pd.to_datetime(df['OpenTime'], format='%H:%M', errors='coerce')
+    df['LocalTime'] = df['LocalTime'] + pd.to_timedelta(local_offset, unit='h')
+    df['LocalTime'] = df['LocalTime'].dt.strftime('%I:%M %p')
+
+
+    # --- Selected Times Column
+    if selected_times is not None:
+        df['Selected'] = df['OpenTime'].isin(selected_times).map({True: '✅', False: ''})
+    else:
+        df['Selected'] = ''
+
+    # --- Insert Gaps for spacing
+    gap = [""] * len(df)
+    df.insert(4, 'Gap1', gap)
+    df.insert(7, 'Gap2', gap)
+    df.insert(10, 'Gap3', gap)
+
+    # --- Final Column Order
+    columns_order = [
+        'LocalTime', 'OpenTime',
+        'Far_Premium', 'Far_PCR', 'Gap1',
+        'Mid_Premium', 'Mid_PCR', 'Gap2',
+        'Near_Premium', 'Near_PCR', 'Gap3',
+        'Avg_Premium', 'Avg_PCR', 'Selected'
+    ]
+    df = df[columns_order]
+
+    # --- Format Premium/PCR Columns
+    for col in df.columns:
+        if '_Premium' in col:
+            df[col] = df[col].map('${:,.2f}'.format)
+        elif '_PCR' in col:
+            df[col] = df[col].astype(float).round(1).astype(str) + '%'
+
+    # --- Add AVG Row
+    avg_row = {}
+    for col in df.columns:
+        if '_Premium' in col or '_PCR' in col:
+            clean_col = df[col].replace(r'[\$,%,]', '', regex=True).astype(float)
+            avg_val = clean_col.mean()
+            if '_Premium' in col:
+                avg_row[col] = f"${avg_val:.2f}"
+            elif '_PCR' in col:
+                avg_row[col] = f"{avg_val:.1f}%"
+        else:
+            avg_row[col] = 'AVG' if col == 'LocalTime' else ''
+
+    df = pd.concat([df, pd.DataFrame([avg_row])], ignore_index=True)
+
+    # --- Background shading
+    cell_colors = []
+    for col in df.columns:
+        if '_Premium' in col or '_PCR' in col:
+            clean_col = df[col].replace(r'[\$,%,]', '', regex=True).astype(float)
+            if clean_col.max() == clean_col.min():
+                norm_col = np.zeros_like(clean_col)
+            else:
+                norm = mcolors.Normalize(vmin=clean_col.min(), vmax=clean_col.max())
+                norm_col = norm(clean_col)
+
+            backgrounds = []
+            for idx, val in enumerate(norm_col):
+                if idx == len(df) - 1:  # AVG row
+                    backgrounds.append(header_fill)
+                else:
+                    rgba = cmap(val)
+                    backgrounds.append(f'rgba({int(rgba[0]*255)}, {int(rgba[1]*255)}, {int(rgba[2]*255)}, 0.5)')
+            cell_colors.append(backgrounds)
+        else:
+            backgrounds = [header_fill if idx == len(df) - 1 else cell_fill for idx in range(len(df))]
+            cell_colors.append(backgrounds)
+
+    # --- Build Table
+    fig = go.Figure(data=[go.Table(
+        columnwidth=[80, 80, 80, 80, 10, 80, 80, 10, 80, 80, 10, 80, 80, 50],
+        header=dict(
+            values=[col if not col.startswith('Gap') else '' for col in df.columns],
+            fill_color=header_fill,
+            align='center',
+            font=dict(color=header_font_color, size=14)
+        ),
+        cells=dict(
+            values=[df[col] for col in df.columns],
+            fill_color=cell_colors,
+            align='center',
+            font=dict(color=header_font_color, size=14),
+            height=30
+        )
+    )])
+
+    fig.update_layout(
+        margin=dict(l=0, r=0, t=10, b=0),
+        height=800
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+
+with tab5:
+
+    st.subheader(f"Entry Time PCR Analysis")
+
+    if ema_df.empty:
+        st.warning("⚠️ No data available.")
+    else:
+        min_date = ema_df['OpenDate'].min().date()
+        max_date = ema_df['OpenDate'].max().date()
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            next_trading_day = st.date_input(
+                "Next Trading Day to Simulate",
+                value=max_date + datetime.timedelta(days=1),
+                min_value=min_date,
+                max_value=max_date + datetime.timedelta(days=1)
+            )
+
+        with col2:
+            timezone = st.selectbox(
+                "Display Timezone for Local Time",
+                options=["US/Eastern", "US/Central", "US/Mountain", "US/Pacific"],
+                index=1  # Central default
+            )
+
+        # --- ✅ Define lookback calculator and dictionary BEFORE using it
+        def calculate_lookback_range(base_date, months_back):
+            base = pd.to_datetime(base_date)
+            start = base - pd.DateOffset(months=months_back)
+            end = base - pd.Timedelta(days=1)
+            return start, end
+
+        lookbacks = {
+            'Far': man_long,
+            'Mid': man_mid,
+            'Near': man_near
+        }
+
+        # --- 📈 Build Lookback Tables
+        lookback_tables = {}
+
+        for label, months in lookbacks.items():
+            lb_start, lb_end = calculate_lookback_range(next_trading_day, months)
+
+            mask = (ema_df['OpenDate'] >= lb_start) & (ema_df['OpenDate'] <= lb_end)
+            df = ema_df.loc[mask]
+
+            if df.empty:
+                st.warning(f"⚠️ No data found for {label} Lookback ({lb_start.date()} to {lb_end.date()})")
+                continue
+
+            pcr_table = df.groupby('OpenTimeFormatted').agg({
+                'PremiumCapture': 'mean',
+                'PCR': 'mean'
+            }).reset_index()
+
+            pcr_table.rename(columns={"OpenTimeFormatted": "OpenTime"}, inplace=True)
+            lookback_tables[label] = pcr_table
+
+        # --- 📈 Merge Lookbacks into Combined Table
+        if lookback_tables:
+            combined = lookback_tables['Far'].copy()
+            combined = combined.rename(columns={"PremiumCapture": "Far_Premium", "PCR": "Far_PCR"})
+            combined = combined.merge(
+                lookback_tables['Mid'].rename(columns={"PremiumCapture": "Mid_Premium", "PCR": "Mid_PCR"}),
+                on="OpenTime", how="outer")
+            combined = combined.merge(
+                lookback_tables['Near'].rename(columns={"PremiumCapture": "Near_Premium", "PCR": "Near_PCR"}),
+                on="OpenTime", how="outer")
+
+            # --- Calculate Average
+            combined['Avg_Premium'] = combined[['Far_Premium', 'Mid_Premium', 'Near_Premium']].mean(axis=1)
+            combined['Avg_PCR'] = combined[['Far_PCR', 'Mid_PCR', 'Near_PCR']].mean(axis=1)
+
+            # --- Multiply PCR to %
+            for col in ['Far_PCR', 'Mid_PCR', 'Near_PCR', 'Avg_PCR']:
+                combined[col] = combined[col] * 100
+
+            # --- Select Top N Times
+            top_times = combined.sort_values(by='Avg_PCR', ascending=False).head(num_times)['OpenTime'].tolist()
+
+            # --- Create Final Table
+            create_time_pcr_table(combined, selected_times=top_times, timezone=timezone, is_dark=True)
+
+        # --- 📅 Lookback Ranges and Selected Times side-by-side
+        left_col, right_col = st.columns(2)
+
+        with left_col:
+            st.markdown("#### Lookback Date Ranges Used")
+            for label, months in lookbacks.items():
+                lb_start, lb_end = calculate_lookback_range(next_trading_day, months)
+                st.markdown(
+                    f"**{label} Lookback:** {months} months — {lb_start.strftime('%m/%d/%Y')} to {lb_end.strftime('%m/%d/%Y')}"
+                )
+
+        with right_col:
+            st.markdown("#### Selected Times")
+
+            top_times_sorted = sorted(top_times) if top_times else []
+
+            if top_times_sorted:
+                # Join all times into a single line, comma separated
+                selected_times_str = ', '.join(top_times_sorted)
+                st.markdown(f"**{selected_times_str}**")
+            else:
+                st.markdown("No times selected.")
+
+# endregion
+
+
+# region --- 🔁 Tab 6: Trend Stability Optimization
+# -----------------------------------------------------
+def run_trend_stability_test_generator(
+    ema_df, entry_range, risk, equity_start,
+    ranking_windows, smoothing_windows, smoothing_types, rolling_windows
+):
+    from itertools import product
+
+    results = []
+    combinations = list(product(ranking_windows, smoothing_windows, smoothing_types))
+
+    total_tests = len(entry_range) * len(rolling_windows) * len(combinations)
+    completed = 0
+
+    for num_times in entry_range:
+        for start_date, end_date in rolling_windows:
+            for rank_win, smooth_win, smooth_type in combinations:
+                daily_equity, _ = calculate_equity_curve_with_dynamic_method(
+                    ema_df=ema_df,
+                    start_date=start_date,
+                    end_date=end_date,
+                    equityStart=equity_start,
+                    risk=risk,
+                    num_times=num_times,
+                    man_near=None, man_mid=None, man_long=None,
+                    average_credit=average_credit,
+                    selection_method="Time Trends",
+                    trend_ranking_days=rank_win,
+                    trend_smoothing_days=smooth_win,
+                    trend_smoothing_type=smooth_type
+                )
+
+                if not daily_equity.empty:
+                    cagr, _, _ = calculate_performance_metrics(daily_equity)
+                    results.append({
+                        'RankingWindow': rank_win,
+                        'SmoothingWindow': smooth_win,
+                        'SmoothingType': smooth_type,
+                        'NumEntries': num_times,
+                        'Start': start_date,
+                        'End': end_date,
+                        'CAGR': cagr
+                    })
+
+                completed += 1
+                yield completed, total_tests, results
+
+with tab6:
+    st.subheader("Trend Stability Optimization")
+
+    if ema_df.empty:
+        st.warning("⚠️ No data available.")
+    else:
+        st.markdown("##### Stability Test Settings")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            lastDay_default = ema_df['OpenDate'].max().date()
+            lastDay = st.date_input("Select Last Day for Analysis", value=lastDay_default)
+            entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (8, 13))
+        with col2:
+            rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (90, 160), step = 10)
+            smooth_min, smooth_max = st.slider("Smoothing Window Range", 5, 60, (5, 20), step = 5)
+            smooth_types = st.multiselect("Smoothing Types", options=["SMA", "EMA"], default=["SMA"])
+
+        if st.button("🚀 Run Trend Stability Optimization"):
+            progress_container = st.empty()
+            result_container = st.empty()
+
+            entry_range = range(entry_min, entry_max + 1)
+            ranking_windows = range(rank_min, rank_max + 1, 10)
+            smoothing_windows = range(smooth_min, smooth_max + 1, 5)
+
+            lastDay_dt = pd.to_datetime(lastDay)
+            rolling_windows = [
+                (lastDay_dt - relativedelta(months=18), lastDay_dt),
+                (lastDay_dt - relativedelta(months=12), lastDay_dt),
+                (lastDay_dt - relativedelta(months=6), lastDay_dt)
+            ]
+
+            all_results = []
+            with progress_container.container():
+                progress = st.progress(0, text="🔍 Running trend stability optimization...")
+                for completed, total, batch_results in run_trend_stability_test_generator(
+                    ema_df, entry_range, risk, equity_start,
+                    ranking_windows, smoothing_windows, smooth_types,
+                    rolling_windows
+                ):
+                    all_results = batch_results
+                    progress.progress(completed / total, text=f"🔍 {completed:,}/{total:,} combinations tested...")
+
+            df = pd.DataFrame(all_results)
+
+            if df.empty:
+                st.warning("⚠️ No stable results found.")
+            else:
+                df['Rank'] = df.groupby(['Start', 'End', 'NumEntries'])['CAGR'].rank(ascending=False, method="dense")
+
+                summary = (
+                    df.groupby(['RankingWindow', 'SmoothingWindow', 'SmoothingType'])['Rank']
+                    .mean()
+                    .reset_index()
+                    .rename(columns={'Rank': 'Stability Score'})
+                    .sort_values('Stability Score')
+                    .round(2)
+                )
+
+                st.success("✅ Stability optimization complete.")
+                st.markdown("Top Results:")
+
+                st.dataframe(summary.head(20), use_container_width=True, height=735)
+# endregion
     
 
-# region --- 🔎 Tab 6: Lookback Optimization
+# region --- 🔎 Tab 7: Avg PCR Lookback Optimization
 # -----------------------------------------------------
-# --- 🔎 Tab 6: Lookback Optimization
+# --- 🔎 Tab 7: Lookback Optimization
 # -----------------------------------------------------
 # --- 📈 Cached heavy calculation
 @st.cache_data(show_spinner=False)
@@ -2056,7 +2172,7 @@ def test_lookback_stability_with_overlap_cached(
     return stability_scores
 
 
-with tab6:
+with tab7:
     st.subheader("Lookback Stability Optimization")
 
     if ema_df.empty:
@@ -2209,118 +2325,7 @@ with tab6:
 #endregion
 
 
-# region --- 🔁 Tab 7: Trend Stability Optimization
-# -----------------------------------------------------
-def run_trend_stability_test_generator(
-    ema_df, entry_range, risk, equity_start,
-    ranking_windows, smoothing_windows, smoothing_types, rolling_windows
-):
-    from itertools import product
 
-    results = []
-    combinations = list(product(ranking_windows, smoothing_windows, smoothing_types))
-
-    total_tests = len(entry_range) * len(rolling_windows) * len(combinations)
-    completed = 0
-
-    for num_times in entry_range:
-        for start_date, end_date in rolling_windows:
-            for rank_win, smooth_win, smooth_type in combinations:
-                daily_equity, _ = calculate_equity_curve_with_dynamic_method(
-                    ema_df=ema_df,
-                    start_date=start_date,
-                    end_date=end_date,
-                    equityStart=equity_start,
-                    risk=risk,
-                    num_times=num_times,
-                    man_near=None, man_mid=None, man_long=None,
-                    average_credit=average_credit,
-                    selection_method="Time Trends",
-                    trend_ranking_days=rank_win,
-                    trend_smoothing_days=smooth_win,
-                    trend_smoothing_type=smooth_type
-                )
-
-                if not daily_equity.empty:
-                    cagr, _, _ = calculate_performance_metrics(daily_equity)
-                    results.append({
-                        'RankingWindow': rank_win,
-                        'SmoothingWindow': smooth_win,
-                        'SmoothingType': smooth_type,
-                        'NumEntries': num_times,
-                        'Start': start_date,
-                        'End': end_date,
-                        'CAGR': cagr
-                    })
-
-                completed += 1
-                yield completed, total_tests, results
-
-with tab7:
-    st.subheader("Trend Stability Optimization")
-
-    if ema_df.empty:
-        st.warning("⚠️ No data available.")
-    else:
-        st.markdown("##### Stability Test Settings")
-
-        col1, col2 = st.columns(2)
-        with col1:
-            lastDay_default = ema_df['OpenDate'].max().date()
-            lastDay = st.date_input("Select Last Day for Analysis", value=lastDay_default)
-            entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (8, 13))
-        with col2:
-            rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (90, 160), step = 10)
-            smooth_min, smooth_max = st.slider("Smoothing Window Range", 5, 60, (5, 20), step = 5)
-            smooth_types = st.multiselect("Smoothing Types", options=["SMA", "EMA"], default=["SMA"])
-
-        if st.button("🚀 Run Trend Stability Optimization"):
-            progress_container = st.empty()
-            result_container = st.empty()
-
-            entry_range = range(entry_min, entry_max + 1)
-            ranking_windows = range(rank_min, rank_max + 1, 10)
-            smoothing_windows = range(smooth_min, smooth_max + 1, 5)
-
-            lastDay_dt = pd.to_datetime(lastDay)
-            rolling_windows = [
-                (lastDay_dt - relativedelta(months=18), lastDay_dt),
-                (lastDay_dt - relativedelta(months=12), lastDay_dt),
-                (lastDay_dt - relativedelta(months=6), lastDay_dt)
-            ]
-
-            all_results = []
-            with progress_container.container():
-                progress = st.progress(0, text="🔍 Running trend stability optimization...")
-                for completed, total, batch_results in run_trend_stability_test_generator(
-                    ema_df, entry_range, risk, equity_start,
-                    ranking_windows, smoothing_windows, smooth_types,
-                    rolling_windows
-                ):
-                    all_results = batch_results
-                    progress.progress(completed / total, text=f"🔍 {completed:,}/{total:,} combinations tested...")
-
-            df = pd.DataFrame(all_results)
-
-            if df.empty:
-                st.warning("⚠️ No stable results found.")
-            else:
-                df['Rank'] = df.groupby(['Start', 'End', 'NumEntries'])['CAGR'].rank(ascending=False, method="dense")
-
-                summary = (
-                    df.groupby(['RankingWindow', 'SmoothingWindow', 'SmoothingType'])['Rank']
-                    .mean()
-                    .reset_index()
-                    .rename(columns={'Rank': 'Stability Score'})
-                    .sort_values('Stability Score')
-                    .round(2)
-                )
-
-                st.success("✅ Stability optimization complete.")
-                st.markdown("Top Results:")
-
-                st.dataframe(summary.head(20), use_container_width=True, height=735)
-# endregion
 
 # region --- 📖 Tab 8: Documenation
 # -----------------------------------------------------
