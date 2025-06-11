@@ -115,7 +115,7 @@ with col1:
     )
     selection_method = st.selectbox(
         "Entry Time Selection Method",
-        options=["Time Trends", "Average PCR"],
+        options=["Time Trends", "Average PCR", "Weekday Time Trends"],
         index=0,
         help="Choose how entry times are selected each period. 'Average PCR' uses a 3-tiered lookback. 'Time Trends' uses cumulative performance with trend filtering."
     )
@@ -486,6 +486,25 @@ def select_times_via_time_trends(ema_df, end_date, num_times, ranking_window, sm
     top_times = selected.sort_values(ascending=False).head(num_times).index.tolist()
     return sorted(top_times)
 
+def select_times_by_weekday_trend(df, end_date, num_times, ranking_window, smoothing_window, smoothing_type):
+    """
+    Select top entry times for each weekday using trend-following logic.
+    Returns:
+        dict: keys are weekday names (Monday to Friday), values are lists of top times.
+    """
+    weekday_times = {}
+    for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]:
+        day_df = df[df["DayOfWeek"] == day]
+        top_times = select_times_via_time_trends(
+            ema_df=day_df,
+            end_date=end_date,
+            num_times=num_times,
+            ranking_window=ranking_window,
+            smoothing_window=smoothing_window,
+            smoothing_type=smoothing_type
+        )
+        weekday_times[day] = top_times
+    return weekday_times
 
 def calculate_equity_curve_with_dynamic_method(
     ema_df,
@@ -513,11 +532,11 @@ def calculate_equity_curve_with_dynamic_method(
     current_equity = equityStart
     results = []
 
-    # Define loop frequency
-    if selection_method == "Time Trends":
+    # Define loop dates
+    if selection_method in ["Time Trends", "Weekday Time Trends"]:
         first_monday = start_date - datetime.timedelta(days=start_date.weekday())
         loop_dates = pd.date_range(start=first_monday, end=end_date, freq='W-MON')
-    else:
+    else:  # Average PCR
         ema_df['PeriodStart'] = ema_df['OpenDate'].dt.to_period('M').dt.start_time
         loop_dates = ema_df[
             (ema_df['OpenDate'] >= pd.to_datetime(start_date)) &
@@ -525,6 +544,8 @@ def calculate_equity_curve_with_dynamic_method(
         ]['PeriodStart'].unique()
 
     for current_period in loop_dates:
+        top_times_sorted = []
+
         if selection_method == "Average PCR":
             near_start = current_period - pd.DateOffset(months=man_near)
             mid_start = current_period - pd.DateOffset(months=man_mid)
@@ -552,6 +573,11 @@ def calculate_equity_curve_with_dynamic_method(
                                          .sort_values('OpenTimeFormatted')['OpenTimeFormatted'] \
                                          .tolist()
 
+            current_period_data = ema_df[
+                (ema_df['OpenDate'] >= current_period) &
+                (ema_df['OpenDate'] < current_period + pd.DateOffset(months=1))
+            ]
+
         elif selection_method == "Time Trends":
             top_times_sorted = select_times_via_time_trends(
                 ema_df=ema_df,
@@ -561,34 +587,75 @@ def calculate_equity_curve_with_dynamic_method(
                 smoothing_window=trend_smoothing_days,
                 smoothing_type=trend_smoothing_type
             )
-        else:
-            continue
 
-        if selection_method == "Time Trends":
             period_end = min(current_period + pd.Timedelta(days=7), end_date + pd.Timedelta(days=1))
-
             current_period_data = ema_df[
                 (ema_df['OpenDate'] >= current_period) &
                 (ema_df['OpenDate'] < period_end)
             ]
-        else:
+
+        elif selection_method == "Weekday Time Trends":
+            weekday_top_times = select_times_by_weekday_trend(
+                df=ema_df,
+                end_date=current_period - pd.Timedelta(days=1),
+                num_times=num_times,
+                ranking_window=trend_ranking_days,
+                smoothing_window=trend_smoothing_days,
+                smoothing_type=trend_smoothing_type
+            )
+
+            period_end = min(current_period + pd.Timedelta(days=7), end_date + pd.Timedelta(days=1))
             current_period_data = ema_df[
                 (ema_df['OpenDate'] >= current_period) &
-                (ema_df['OpenDate'] < current_period + pd.DateOffset(months=1))
+                (ema_df['OpenDate'] < period_end)
             ]
 
-        current_period_data = current_period_data[current_period_data['OpenTimeFormatted'].isin(top_times_sorted)]
-        current_period_data = current_period_data[current_period_data['OpenDate'] >= pd.to_datetime(start_date)]
+            for trade_date, day_trades in current_period_data.groupby('OpenDate'):
+                weekday = trade_date.strftime('%A')
+                best_times = weekday_top_times.get(weekday, [])
+                if not best_times:
+                    continue
 
-        if current_period_data.empty:
+                filtered_trades = day_trades[day_trades['OpenTimeFormatted'].isin(best_times)]
+                if filtered_trades.empty:
+                    continue
+
+                equity_at_day_start = equityStart if trade_date == pd.to_datetime(start_date) else current_equity
+                contracts = floor(equity_at_day_start * (risk / 100) / num_times / (average_credit * 100)) if average_credit else 0
+
+                for _, trade in filtered_trades.sort_values('OpenTimeFormatted').iterrows():
+                    profit_loss = trade['PremiumCapture'] * contracts
+                    current_equity += profit_loss
+
+                    results.append({
+                        'Date': trade['OpenDate'],
+                        'OpenTime': trade['OpenTimeFormatted'],
+                        'Contracts': contracts,
+                        'PremiumCapture': trade['PremiumCapture'],
+                        'Premium': trade['Premium'],
+                        'ProfitLoss': profit_loss,
+                        'Equity': current_equity,
+                        'SelectionMethod': selection_method
+                    })
+            continue  # skip shared post-processing for this mode
+
+        # Post-processing for "Time Trends" and "Average PCR"
+        if current_period_data.empty or not top_times_sorted:
             continue
 
-        for trade_date, day_trades in current_period_data.groupby('OpenDate'):
+        filtered_data = current_period_data[
+            current_period_data['OpenTimeFormatted'].isin(top_times_sorted)
+        ]
+
+        filtered_data = filtered_data[filtered_data['OpenDate'] >= pd.to_datetime(start_date)]
+        if filtered_data.empty:
+            continue
+
+        for trade_date, day_trades in filtered_data.groupby('OpenDate'):
             equity_at_day_start = equityStart if trade_date == pd.to_datetime(start_date) else current_equity
             contracts = floor(equity_at_day_start * (risk / 100) / num_times / (average_credit * 100)) if average_credit else 0
-            day_trades = day_trades.sort_values('OpenTimeFormatted')
 
-            for _, trade in day_trades.iterrows():
+            for _, trade in day_trades.sort_values('OpenTimeFormatted').iterrows():
                 profit_loss = trade['PremiumCapture'] * contracts
                 current_equity += profit_loss
 
@@ -619,7 +686,10 @@ def calculate_equity_curve_with_dynamic_method(
                 results.append(row)
 
     results_df = pd.DataFrame(results)
-    daily_equity = results_df.groupby('Date', as_index=False)['Equity'].last().sort_values(by='Date')
+    if not results_df.empty and 'Date' in results_df.columns:
+        daily_equity = results_df.groupby('Date', as_index=False)['Equity'].last().sort_values(by='Date')
+    else:
+        daily_equity = pd.DataFrame()
 
     return daily_equity, results_df
 
@@ -1032,7 +1102,7 @@ with tab1:
                             period_group = full_trades['Date'].dt.to_period('M')
                             label_format = "%Y-%m"
                         else:
-                            # Group by Monday of each week (start of trading week)
+                            # Group by Monday of each week
                             period_group = full_trades['Date'] - pd.to_timedelta(full_trades['Date'].dt.weekday, unit='D')
                             period_group = period_group.dt.to_period('W')
                             label_format = "Week of %Y-%m-%d"
@@ -1045,12 +1115,9 @@ with tab1:
                             else:
                                 st.markdown(f"##### Week of {period_start_date.strftime('%Y-%m-%d')}")
 
-                            selected_times = sorted(trades['OpenTime'].unique())
-                            selected_times_str = ', '.join(selected_times) if selected_times else "No trades"
                             end_equity = trades['Equity'].iloc[-1]
 
                             if selection_method == "Average PCR":
-                                # Show lookback details only for PCR-based selection
                                 far_start = trades['LongLookbackStart'].min()
                                 far_end = trades['LongLookbackEnd'].max()
                                 mid_start = trades['MidLookbackStart'].min()
@@ -1062,29 +1129,15 @@ with tab1:
                                 st.markdown(f"📅 **Mid Lookback:** {man_mid} months — {mid_start.strftime('%m/%d/%Y')} to {mid_end.strftime('%m/%d/%Y')}")
                                 st.markdown(f"📅 **Near Lookback:** {man_near} months — {near_start.strftime('%m/%d/%Y')} to {near_end.strftime('%m/%d/%Y')}")
                             else:
-                                # Get all unique trading days, sorted
                                 trading_days = sorted(ema_df['OpenDate'].unique())
-
-                                # First trade date for this week
                                 first_trade_date = trades['Date'].min()
-
-                                # Anchor to Monday of the week (start of that trading period)
                                 monday_of_week = first_trade_date - datetime.timedelta(days=first_trade_date.weekday())
-
-                                # Get all trading days strictly before this Monday
                                 prior_trading_days = [d for d in trading_days if d < monday_of_week]
-
-                                # Take the most recent N days before this Monday
                                 recent_trading_days = prior_trading_days[-trend_ranking_days:]
 
-                                # Determine actual start and end used in time trend logic
                                 if recent_trading_days:
                                     trend_start = recent_trading_days[0]
                                     trend_end = recent_trading_days[-1]
-                                else:
-                                    trend_start = trend_end = None  # fallback if not enough data
-
-                                if trend_start and trend_end:
                                     st.markdown(
                                         f"🔁 **Trend Ranking:** Last {trend_ranking_days} days "
                                         f"({trend_start.strftime('%Y-%m-%d')} to {trend_end.strftime('%Y-%m-%d')}) | "
@@ -1092,8 +1145,20 @@ with tab1:
                                     )
                                 else:
                                     st.markdown("⚠️ Not enough historical trading days for trend analysis.")
-                            
-                            st.markdown(f"⏰ **Selected Times:** {selected_times_str}")
+
+                            # Entry Times Section
+                            if selection_method == "Weekday Time Trends":
+                                times_by_day = trades.groupby(trades['Date'].dt.day_name())['OpenTime'].unique()
+                                st.markdown("⏰ **Selected Times by Day:**")
+                                for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]:
+                                    times = sorted(times_by_day.get(day, []))
+                                    times_str = ', '.join(times) if times else "—"
+                                    st.markdown(f"- **{day}**: {times_str}")
+                            else:
+                                selected_times = sorted(trades['OpenTime'].unique())
+                                selected_times_str = ', '.join(selected_times) if selected_times else "No trades"
+                                st.markdown(f"⏰ **Selected Times:** {selected_times_str}")
+
                             st.markdown(f"💵 **End Equity:** ${end_equity:,.2f}")
                             
                 with button_col:
@@ -1633,7 +1698,7 @@ with tab4:
     st.subheader("Entry Time Trends")
 
     # --- Input Header Row Layout
-    trend_col1, trend_col2, trend_col3 = st.columns([2, 2, 1])
+    trend_col1, trend_col2, trend_col3, trend_col4 = st.columns([2, 2, 2, 1.5])
 
     with trend_col1:
         max_available_date = ema_df['OpenDate'].max().date()
@@ -1656,6 +1721,18 @@ with tab4:
         )
 
     with trend_col3:
+        selected_day = st.selectbox(
+            "Filter by Day of Week:",
+            options=["All Days", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+        )
+
+        # Apply day-of-week filter if not 'All Days'
+        if selected_day != "All Days":
+            day_filtered_df = ema_df[ema_df['DayOfWeek'] == selected_day]
+        else:
+            day_filtered_df = ema_df
+
+    with trend_col4:
         st.markdown("###### ")  # <-- pushes toggle downward for alignment
         show_all_times = st.toggle(
             "Show All Entry Times",
@@ -1667,7 +1744,7 @@ with tab4:
     monday = pd.to_datetime(trend_check_date) - pd.Timedelta(days=trend_check_date.weekday())
 
     # --- Calculate trend date range (rolling N trading days before Monday)
-    trading_days = sorted(ema_df['OpenDate'].unique())
+    trading_days = sorted(day_filtered_df['OpenDate'].unique())
     prior_trading_days = [d for d in trading_days if d < monday]
     recent_trading_days = prior_trading_days[-trend_ranking_days:]
 
@@ -1679,7 +1756,7 @@ with tab4:
 
     # --- Select times using Time Trend method for this week
     selected_times_trend = select_times_via_time_trends(
-        ema_df=ema_df,
+        ema_df=day_filtered_df,
         end_date=monday - pd.Timedelta(days=1),
         num_times=num_times,
         ranking_window=trend_ranking_days,
@@ -1726,31 +1803,29 @@ with tab4:
                 f"{trend_smoothing_days}-day {trend_smoothing_type.upper()} smoothing"
             )
 
-
     # --- Create Daily PnL per Slot
-    ema_df['DailyPnL'] = ema_df['PremiumCapture']
+    day_filtered_df['DailyPnL'] = day_filtered_df['PremiumCapture']
 
     daily_slot_pnl = (
-        ema_df
+        day_filtered_df
         .groupby(['OpenDate', 'OpenTimeFormatted'], as_index=False)
         .agg({'DailyPnL': 'sum'})
     )
 
     # --- Plot all entry slots, highlight selected
-    # Calculate Monday of selected week
     trend_check_date = pd.to_datetime(trend_check_date)
     trend_check_monday = trend_check_date - pd.Timedelta(days=trend_check_date.weekday())
 
     plot_slot_equity_curves_plotly(
         daily_slot_pnl=daily_slot_pnl,
-        ema_df=ema_df,
+        ema_df=day_filtered_df,
         ranking_window=trend_ranking_days,
         smoothing_window=trend_smoothing_days,
         smoothing_type=trend_smoothing_type,
         selected_times=selected_times_trend if not show_all_times else None,
         columns=2,
-        lookback_end=trend_check_monday - pd.Timedelta(days=1),  # ✅ Prevents lookahead
-        highlight_times=selected_times_trend  # if applicable
+        lookback_end=trend_check_monday - pd.Timedelta(days=1),
+        highlight_times=selected_times_trend
     )
 
 # endregion
