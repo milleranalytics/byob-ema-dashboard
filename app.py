@@ -176,15 +176,15 @@ with col3:
             help="Number of recent trading days to rank entry times on cumulative performance."
         )
         trend_smoothing_days = st.number_input(
-            "Trend Smoothing Window",
+            "Moving Average Length",
             value=trend_smoothing_days,
             step=1,
             min_value=2,
             max_value=60,
-            help="Window size for moving average used to confirm upward trend in entry time."
+            help="Length of moving average used to confirm upward trend in entry time."
         )
         trend_smoothing_type = st.selectbox(
-            "Smoothing Type",
+            "Moving Average Type",
             options=["SMA", "EMA"],
             index=0 if trend_smoothing_type == "SMA" else 1,
             help="Type of moving average used for trend confirmation."
@@ -1629,6 +1629,29 @@ def plot_slot_equity_curves_plotly(
     st.plotly_chart(fig, use_container_width=True)
 
 
+@st.cache_data
+def get_selected_times(
+    ema_df, end_date, num_times,
+    ranking_window, smoothing_window,
+    smoothing_type, selected_day
+):
+    return select_times_via_time_trends(
+        ema_df=ema_df,
+        end_date=end_date,
+        num_times=num_times,
+        ranking_window=ranking_window,
+        smoothing_window=smoothing_window,
+        smoothing_type=smoothing_type
+    )
+
+
+@st.cache_data
+def compute_daily_slot_pnl(df):
+    df = df.copy()
+    df['DailyPnL'] = df['PremiumCapture']
+    return df.groupby(['OpenDate', 'OpenTimeFormatted'], as_index=False).agg({'DailyPnL': 'sum'})
+
+
 with tab4:
     st.subheader("Entry Time Trends")
 
@@ -1690,13 +1713,14 @@ with tab4:
         trend_start = trend_end = None
 
     # --- Select times using Time Trend method for this week
-    selected_times_trend = select_times_via_time_trends(
+    selected_times_trend = get_selected_times(
         ema_df=day_filtered_df,
         end_date=monday - pd.Timedelta(days=1),
         num_times=num_times,
         ranking_window=trend_ranking_days,
         smoothing_window=trend_smoothing_days,
-        smoothing_type=trend_smoothing_type
+        smoothing_type=trend_smoothing_type,
+        selected_day=selected_day  # force the cache to see this UI dependency
     )
 
     # --- Local Time conversion
@@ -1723,6 +1747,15 @@ with tab4:
 
         with time_col1:
             st.markdown("#### Selected Times")
+
+            num_selected = len(selected_times_trend)
+            st.markdown(
+                f"{num_selected} of {num_times} times selected"
+                f"<span style='color:gray; margin-left:6px; cursor:help;' "
+                f"title='Only times that exceed their moving average are selected'>ⓘ</span>",
+                unsafe_allow_html=True
+            )
+
             top_row = ', '.join(selected_times_trend)
             bottom_row = ', '.join(local_times)
             st.markdown(f"{top_row}")
@@ -1735,17 +1768,11 @@ with tab4:
                 f"({trend_ranking_days} trading days)"
             )
             st.markdown(
-                f"{trend_smoothing_days}-day {trend_smoothing_type.upper()} smoothing"
+                f"{trend_smoothing_days}-day {trend_smoothing_type.upper()} moving average"
             )
 
     # --- Create Daily PnL per Slot
-    day_filtered_df['DailyPnL'] = day_filtered_df['PremiumCapture']
-
-    daily_slot_pnl = (
-        day_filtered_df
-        .groupby(['OpenDate', 'OpenTimeFormatted'], as_index=False)
-        .agg({'DailyPnL': 'sum'})
-    )
+    daily_slot_pnl = compute_daily_slot_pnl(day_filtered_df)
 
     # --- Plot all entry slots, highlight selected
     trend_check_date = pd.to_datetime(trend_check_date)
@@ -2056,7 +2083,7 @@ with tab6:
             lastDay = st.date_input("Select Last Day for Analysis", value=lastDay_default)
             entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (8, 13))
         with col2:
-            rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (90, 160), step = 10)
+            rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (80, 160), step = 10)
             smooth_min, smooth_max = st.slider("Smoothing Window Range", 5, 60, (5, 15), step = 5)
             smooth_types = st.multiselect("Smoothing Types", options=["SMA", "EMA"], default=["SMA"])
 
