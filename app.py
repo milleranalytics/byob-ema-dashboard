@@ -115,7 +115,7 @@ with col1:
     )
     selection_method = st.selectbox(
         "Entry Time Selection Method",
-        options=["Time Trends", "Average PCR", "Day-of-Week Trends"],
+        options=["Time Trends", "Average PCR"],
         index=0,
         help="Choose how entry times are selected each period. 'Average PCR' uses a 3-tiered lookback. 'Time Trends' uses cumulative performance with trend filtering."
     )
@@ -176,15 +176,15 @@ with col3:
             help="Number of recent trading days to rank entry times on cumulative performance."
         )
         trend_smoothing_days = st.number_input(
-            "Trend Smoothing Window",
+            "Moving Average Length",
             value=trend_smoothing_days,
             step=1,
             min_value=2,
             max_value=60,
-            help="Window size for moving average used to confirm upward trend in entry time."
+            help="Length of moving average used to confirm upward trend in entry time."
         )
         trend_smoothing_type = st.selectbox(
-            "Smoothing Type",
+            "Moving Average Type",
             options=["SMA", "EMA"],
             index=0 if trend_smoothing_type == "SMA" else 1,
             help="Type of moving average used for trend confirmation."
@@ -486,27 +486,6 @@ def select_times_via_time_trends(ema_df, end_date, num_times, ranking_window, sm
     top_times = selected.sort_values(ascending=False).head(num_times).index.tolist()
     return sorted(top_times)
 
-def select_times_by_day_of_week_trends(ema_df, end_date, num_times, ranking_window, smoothing_window, smoothing_type):
-    """
-    Select optimal entry times for each day of the week using time trend logic.
-
-    Returns:
-        dict: e.g. {'Monday': ['10:00', '11:30'], 'Tuesday': [...], ...}
-    """
-    schedule = {}
-    for day in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]:
-        day_df = ema_df[ema_df['DayOfWeek'] == day]
-        selected = select_times_via_time_trends(
-            ema_df=day_df,
-            end_date=end_date,
-            num_times=num_times,
-            ranking_window=ranking_window,
-            smoothing_window=smoothing_window,
-            smoothing_type=smoothing_type
-        )
-        schedule[day] = selected
-    return schedule
-
 
 def calculate_equity_curve_with_dynamic_method(
     ema_df,
@@ -582,38 +561,15 @@ def calculate_equity_curve_with_dynamic_method(
                 smoothing_window=trend_smoothing_days,
                 smoothing_type=trend_smoothing_type
             )
-
-        elif selection_method == "Day-of-Week Trends":
-            schedule = select_times_by_day_of_week_trends(
-                ema_df=ema_df,
-                end_date=current_period - pd.Timedelta(days=1),
-                num_times=num_times,
-                ranking_window=trend_ranking_days,
-                smoothing_window=trend_smoothing_days,
-                smoothing_type=trend_smoothing_type
-            )
-
         else:
             continue
 
         if selection_method == "Time Trends":
             period_end = min(current_period + pd.Timedelta(days=7), end_date + pd.Timedelta(days=1))
+
             current_period_data = ema_df[
                 (ema_df['OpenDate'] >= current_period) &
                 (ema_df['OpenDate'] < period_end)
-            ]
-
-        elif selection_method == "Day-of-Week Trends":
-            current_period_data = ema_df[
-                (ema_df['OpenDate'] >= current_period) &
-                (ema_df['OpenDate'] < current_period + pd.Timedelta(days=7))
-            ].copy()
-            current_period_data['DayOfWeek'] = current_period_data['OpenDate'].dt.day_name()
-            current_period_data = current_period_data[
-                current_period_data.apply(
-                    lambda row: row['OpenTimeFormatted'] in schedule.get(row['DayOfWeek'], []),
-                    axis=1
-                )
             ]
         else:
             current_period_data = ema_df[
@@ -621,10 +577,7 @@ def calculate_equity_curve_with_dynamic_method(
                 (ema_df['OpenDate'] < current_period + pd.DateOffset(months=1))
             ]
 
-        if selection_method != "Day-of-Week Trends":
-            current_period_data = current_period_data[
-                current_period_data['OpenTimeFormatted'].isin(top_times_sorted)
-            ]
+        current_period_data = current_period_data[current_period_data['OpenTimeFormatted'].isin(top_times_sorted)]
         current_period_data = current_period_data[current_period_data['OpenDate'] >= pd.to_datetime(start_date)]
 
         if current_period_data.empty:
@@ -666,20 +619,7 @@ def calculate_equity_curve_with_dynamic_method(
                 results.append(row)
 
     results_df = pd.DataFrame(results)
-    # --- Build daily equity with full calendar coverage ---
-    # Step 1: Compute equity only on trade days
-    trade_day_equity = results_df.groupby('Date', as_index=False)['Equity'].last().sort_values(by='Date')
-
-    # Step 2: Create all calendar days in the backtest range
-    all_days = pd.date_range(start=start_date, end=end_date, freq='D')
-
-    # Step 3: Reindex and forward-fill to cover flat days, and ensure initial equity exists
-    daily_equity = trade_day_equity.set_index('Date').reindex(all_days)
-    daily_equity.loc[all_days[0], 'Equity'] = equityStart  # ensure first day has equity
-    daily_equity = daily_equity.ffill().reset_index()
-    daily_equity.columns = ['Date', 'Equity']
-    # Optional: mark whether a trade occurred that day (for later analysis or display)
-    daily_equity['TradeOccurred'] = daily_equity['Date'].isin(trade_day_equity['Date'].unique())
+    daily_equity = results_df.groupby('Date', as_index=False)['Equity'].last().sort_values(by='Date')
 
     return daily_equity, results_df
 
@@ -1026,16 +966,6 @@ with tab1:
                 trend_smoothing_type=trend_smoothing_type
             )
 
-            # 🧪 Diagnostic: how often are we trading?
-            if not full_trades.empty:
-                all_days = pd.date_range(start=start_date, end=end_date, freq="D")
-                trade_days = full_trades['Date'].nunique()
-                print("📅 Total days:", len(all_days))
-                print("📊 Trade days:", trade_days)
-                print(f"📈 Trade coverage: {100 * trade_days / len(all_days):.2f}%")
-            else:
-                print("⚠️ No trades found in full_trades.")
-
             if equity_curve.empty:
                 st.warning("⚠️ No trades generated for the selected period and parameters.")
             else:
@@ -1094,7 +1024,6 @@ with tab1:
                 st.subheader("Detailed Trade Insights")
 
                 expander_col, button_col = st.columns([2, 1])
-
 
                 # --- 📅 Monthly Summary
                 with expander_col:
@@ -1700,11 +1629,34 @@ def plot_slot_equity_curves_plotly(
     st.plotly_chart(fig, use_container_width=True)
 
 
+@st.cache_data
+def get_selected_times(
+    ema_df, end_date, num_times,
+    ranking_window, smoothing_window,
+    smoothing_type, selected_day
+):
+    return select_times_via_time_trends(
+        ema_df=ema_df,
+        end_date=end_date,
+        num_times=num_times,
+        ranking_window=ranking_window,
+        smoothing_window=smoothing_window,
+        smoothing_type=smoothing_type
+    )
+
+
+@st.cache_data
+def compute_daily_slot_pnl(df):
+    df = df.copy()
+    df['DailyPnL'] = df['PremiumCapture']
+    return df.groupby(['OpenDate', 'OpenTimeFormatted'], as_index=False).agg({'DailyPnL': 'sum'})
+
+
 with tab4:
     st.subheader("Entry Time Trends")
 
     # --- Input Header Row Layout
-    trend_col1, trend_col2, trend_col3 = st.columns([2, 2, 1])
+    trend_col1, trend_col2, trend_col3, trend_col4 = st.columns([2, 2, 2, 1.5])
 
     with trend_col1:
         max_available_date = ema_df['OpenDate'].max().date()
@@ -1727,6 +1679,18 @@ with tab4:
         )
 
     with trend_col3:
+        selected_day = st.selectbox(
+            "Filter by Day of Week:",
+            options=["All Days", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+        )
+
+        # Apply day-of-week filter if not 'All Days'
+        if selected_day != "All Days":
+            day_filtered_df = ema_df[ema_df['DayOfWeek'] == selected_day]
+        else:
+            day_filtered_df = ema_df
+
+    with trend_col4:
         st.markdown("###### ")  # <-- pushes toggle downward for alignment
         show_all_times = st.toggle(
             "Show All Entry Times",
@@ -1738,7 +1702,7 @@ with tab4:
     monday = pd.to_datetime(trend_check_date) - pd.Timedelta(days=trend_check_date.weekday())
 
     # --- Calculate trend date range (rolling N trading days before Monday)
-    trading_days = sorted(ema_df['OpenDate'].unique())
+    trading_days = sorted(day_filtered_df['OpenDate'].unique())
     prior_trading_days = [d for d in trading_days if d < monday]
     recent_trading_days = prior_trading_days[-trend_ranking_days:]
 
@@ -1749,13 +1713,14 @@ with tab4:
         trend_start = trend_end = None
 
     # --- Select times using Time Trend method for this week
-    selected_times_trend = select_times_via_time_trends(
-        ema_df=ema_df,
+    selected_times_trend = get_selected_times(
+        ema_df=day_filtered_df,
         end_date=monday - pd.Timedelta(days=1),
         num_times=num_times,
         ranking_window=trend_ranking_days,
         smoothing_window=trend_smoothing_days,
-        smoothing_type=trend_smoothing_type
+        smoothing_type=trend_smoothing_type,
+        selected_day=selected_day  # force the cache to see this UI dependency
     )
 
     # --- Local Time conversion
@@ -1782,6 +1747,15 @@ with tab4:
 
         with time_col1:
             st.markdown("#### Selected Times")
+
+            num_selected = len(selected_times_trend)
+            st.markdown(
+                f"{num_selected} of {num_times} times selected"
+                f"<span style='color:gray; margin-left:6px; cursor:help;' "
+                f"title='Only times that exceed their moving average are selected'>ⓘ</span>",
+                unsafe_allow_html=True
+            )
+
             top_row = ', '.join(selected_times_trend)
             bottom_row = ', '.join(local_times)
             st.markdown(f"{top_row}")
@@ -1794,34 +1768,26 @@ with tab4:
                 f"({trend_ranking_days} trading days)"
             )
             st.markdown(
-                f"{trend_smoothing_days}-day {trend_smoothing_type.upper()} smoothing"
+                f"{trend_smoothing_days}-day {trend_smoothing_type.upper()} moving average"
             )
 
-
     # --- Create Daily PnL per Slot
-    ema_df['DailyPnL'] = ema_df['PremiumCapture']
-
-    daily_slot_pnl = (
-        ema_df
-        .groupby(['OpenDate', 'OpenTimeFormatted'], as_index=False)
-        .agg({'DailyPnL': 'sum'})
-    )
+    daily_slot_pnl = compute_daily_slot_pnl(day_filtered_df)
 
     # --- Plot all entry slots, highlight selected
-    # Calculate Monday of selected week
     trend_check_date = pd.to_datetime(trend_check_date)
     trend_check_monday = trend_check_date - pd.Timedelta(days=trend_check_date.weekday())
 
     plot_slot_equity_curves_plotly(
         daily_slot_pnl=daily_slot_pnl,
-        ema_df=ema_df,
+        ema_df=day_filtered_df,
         ranking_window=trend_ranking_days,
         smoothing_window=trend_smoothing_days,
         smoothing_type=trend_smoothing_type,
         selected_times=selected_times_trend if not show_all_times else None,
         columns=2,
-        lookback_end=trend_check_monday - pd.Timedelta(days=1),  # ✅ Prevents lookahead
-        highlight_times=selected_times_trend  # if applicable
+        lookback_end=trend_check_monday - pd.Timedelta(days=1),
+        highlight_times=selected_times_trend
     )
 
 # endregion
@@ -2117,7 +2083,7 @@ with tab6:
             lastDay = st.date_input("Select Last Day for Analysis", value=lastDay_default)
             entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (8, 13))
         with col2:
-            rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (90, 160), step = 10)
+            rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (80, 160), step = 10)
             smooth_min, smooth_max = st.slider("Smoothing Window Range", 5, 60, (5, 15), step = 5)
             smooth_types = st.multiselect("Smoothing Types", options=["SMA", "EMA"], default=["SMA"])
 
