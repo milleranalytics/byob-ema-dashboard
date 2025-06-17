@@ -2238,9 +2238,9 @@ with tab7:
             )
 
         with col2:
-            near_min, near_max = st.slider("Near Lookback Range (Months)", 1, 12, (2, 5))
-            mid_min, mid_max = st.slider("Mid Lookback Range (Months)", 1, 12, (5, 9))
-            long_min, long_max = st.slider("Long Lookback Range (Months)", 1, 12, (9, 12))
+            near_min, near_max = st.slider("Near Lookback Range (Months)", 1, 12, (1, 4))
+            mid_min, mid_max = st.slider("Mid Lookback Range (Months)", 1, 12, (2, 9))
+            long_min, long_max = st.slider("Long Lookback Range (Months)", 1, 12, (6, 12))
 
         run_button = st.button("🚀 Run Stability Test")
         results_container = st.empty()
