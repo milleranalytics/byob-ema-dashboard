@@ -621,6 +621,16 @@ def calculate_equity_curve_with_dynamic_method(
     results_df = pd.DataFrame(results)
     daily_equity = results_df.groupby('Date', as_index=False)['Equity'].last().sort_values(by='Date')
 
+    # ✅ Inject starting equity row before the first trade
+    if not daily_equity.empty:
+        first_trade_date = daily_equity['Date'].min() - pd.Timedelta(days=1)
+        starting_row = pd.DataFrame([{
+            'Date': first_trade_date,
+            'Equity': equityStart
+        }])
+        daily_equity = pd.concat([starting_row, daily_equity], ignore_index=True).sort_values(by='Date')
+
+
     return daily_equity, results_df
 
 
