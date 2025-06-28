@@ -1,13 +1,13 @@
 {
   "man_near": 2,
-  "man_mid": 2,
-  "man_long": 11,
-  "num_times": 8,
-  "risk": 4.0,
+  "man_mid": 5,
+  "man_long": 9,
+  "num_times": 10,
+  "risk": 3.5,
   "equity_start": 300000,
-  "credit_target": 2.4,
+  "credit_target": 2.3,
   "trend_ranking_days": 90,
   "trend_smoothing_days": 11,
   "trend_smoothing_type": "SMA",
-  "selection_method": "Average PCR"
+  "selection_method": "Time Trends"
 }
