@@ -46,6 +46,7 @@ num_times = defaults.get("num_times", 12)
 risk = defaults.get("risk", 4.0)
 equity_start = defaults.get("equity_start", 300_000)
 credit_target = defaults.get("credit_target", 2.5)
+stop_multiple = defaults.get("stop_multiple", 1.25) 
 num_times_range = range(3, 25) # Range for num times optimizer
 trend_ranking_days = defaults.get("trend_ranking_days", 160)
 trend_smoothing_days = defaults.get("trend_smoothing_days", 5)
@@ -53,7 +54,7 @@ trend_smoothing_type = defaults.get("trend_smoothing_type", "SMA")
 
 # Title
 st.title("BYOB EMA Dashboard")
-st.markdown(f"**${credit_target:.2f} Target Credit, 1.5X Stops**")
+st.markdown(f"**${credit_target:.2f} Target Credit, {stop_multiple:.2f}X Stops**")
 
 
 # region --- 📥 Load CSV & Prepare Data
