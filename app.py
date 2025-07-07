@@ -951,7 +951,7 @@ with tab1:
         lookback_str = f"Trend Ranking: Last {trend_ranking_days} days / {trend_smoothing_days}-day {trend_smoothing_type.upper()}"
     st.subheader(f"Equity Curve and Drawdown ({start_date.date()} to {end_date.date()})")
     st.markdown(
-        f"##### Target Credit: ${credit_target:.2f} | Entries: {num_times} | Risk: {risk:.1f}% | {lookback_str}"
+        f"##### Target Credit: ${credit_target:.2f} | {stop_multiple}X Stops | Entries: {num_times} | Risk: {risk:.1f}% | {lookback_str}"
     )
 
     # Reserve container for all UI output
@@ -1261,7 +1261,7 @@ with tab2:
         lookback_str = f"Trend Ranking: Last {trend_ranking_days} days / {trend_smoothing_days}-day {trend_smoothing_type.upper()}"
     st.subheader(f"Entries Optimization Analysis ({start_date.date()} to {end_date.date()})")
     st.markdown(
-        f"##### Target Credit: ${credit_target:.2f} | Risk: {risk:.1f}% | {lookback_str}"
+        f"##### Target Credit: ${credit_target:.2f} | {stop_multiple}X Stops | Risk: {risk:.1f}% | {lookback_str}"
     )
 
     # Reserve UI space early
@@ -1413,7 +1413,7 @@ with tab3:
 
     st.subheader(f"Risk Optimization Analysis ({start_date.date()} to {end_date.date()})")
     st.markdown(
-        f"##### Target Credit: ${credit_target:.2f} | Entries: {num_times} | {lookback_str}"
+        f"##### Target Credit: ${credit_target:.2f} | {stop_multiple}X Stops | Entries: {num_times} | {lookback_str}"
     )
 
     risk_container = st.empty()
