@@ -1644,8 +1644,7 @@ def plot_slot_equity_curves_plotly(
 def get_selected_times(
     ema_df, end_date, num_times,
     ranking_window, smoothing_window,
-    smoothing_type, selected_day,
-    trade_direction
+    smoothing_type, selected_day
 ):
     return select_times_via_time_trends(
         ema_df=ema_df,
@@ -1668,7 +1667,7 @@ with tab4:
     st.subheader("Entry Time Trends")
 
     # --- Input Header Row Layout
-    trend_col1, trend_col2, trend_col3, trend_col4, trend_col5 = st.columns([2, 2, 2, 1.5, 2])
+    trend_col1, trend_col2, trend_col3, trend_col4 = st.columns([2, 2, 2, 1.5])
 
     with trend_col1:
         max_available_date = ema_df['OpenDate'].max().date()
@@ -1677,7 +1676,7 @@ with tab4:
         default_trend_date = max_available_date + datetime.timedelta(days=days_until_next_monday or 7)
 
         trend_check_date = st.date_input(
-            "Select Date to Inspect",
+            "Select Date to Inspect (Entry Times from that Week)",
             value=default_trend_date,
             min_value=ema_df['OpenDate'].min().date(),
             max_value=future_limit
@@ -1696,56 +1695,46 @@ with tab4:
             options=["All Days", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
         )
 
-    with trend_col4:
-        trade_direction = st.selectbox(
-            "Trade Direction:",
-            options=["Both", "Calls", "Puts"],
-            index=0,
-            help="Filter to show only Calls (OptionType = 'C'), Puts (OptionType = 'P'), or Both."
-        )
+        # Apply day-of-week filter if not 'All Days'
+        if selected_day != "All Days":
+            day_filtered_df = ema_df[ema_df['DayOfWeek'] == selected_day]
+        else:
+            day_filtered_df = ema_df
 
-    with trend_col5:
-        st.markdown("###### ")
+    with trend_col4:
+        st.markdown("###### ")  # <-- pushes toggle downward for alignment
         show_all_times = st.toggle(
             "Show All Entry Times",
             value=False,
             help="If enabled, all entry time graphs will be shown. Otherwise, only selected times will be displayed."
         )
 
-
-    # --- Apply filtering based on day of week and direction
-    filtered_df = ema_df.copy()
-
-    if selected_day != "All Days":
-        filtered_df = filtered_df[filtered_df['DayOfWeek'] == selected_day]
-
-    if trade_direction == "Calls":
-        filtered_df = filtered_df[filtered_df['OptionType'] == 'C']
-    elif trade_direction == "Puts":
-        filtered_df = filtered_df[filtered_df['OptionType'] == 'P']
-
-    # --- Calculate lookback date range
+    # --- Compute Monday of selected week
     monday = pd.to_datetime(trend_check_date) - pd.Timedelta(days=trend_check_date.weekday())
-    trading_days = sorted(filtered_df['OpenDate'].unique())
+
+    # --- Calculate trend date range (rolling N trading days before Monday)
+    trading_days = sorted(day_filtered_df['OpenDate'].unique())
     prior_trading_days = [d for d in trading_days if d < monday]
     recent_trading_days = prior_trading_days[-trend_ranking_days:]
 
-    trend_start = recent_trading_days[0] if recent_trading_days else None
-    trend_end = recent_trading_days[-1] if recent_trading_days else None
+    if recent_trading_days:
+        trend_start = recent_trading_days[0]
+        trend_end = recent_trading_days[-1]
+    else:
+        trend_start = trend_end = None
 
-    # --- Select best times
+    # --- Select times using Time Trend method for this week
     selected_times_trend = get_selected_times(
-        ema_df=filtered_df,
+        ema_df=day_filtered_df,
         end_date=monday - pd.Timedelta(days=1),
         num_times=num_times,
         ranking_window=trend_ranking_days,
         smoothing_window=trend_smoothing_days,
         smoothing_type=trend_smoothing_type,
-        selected_day=selected_day,
-        trade_direction=trade_direction  # ensure cache works properly
+        selected_day=selected_day  # force the cache to see this UI dependency
     )
 
-    # --- Display local times
+    # --- Local Time conversion
     def convert_to_local(open_times, timezone_str):
         offset = {
             'US/Eastern': 0,
@@ -1763,41 +1752,52 @@ with tab4:
 
     local_times = convert_to_local(selected_times_trend, timezone)
 
-    # --- Summary display
+    # --- Display Trend Range and Times
     if trend_start and trend_end:
         time_col1, time_col2 = st.columns([1.13, 1])
 
         with time_col1:
             st.markdown("#### Selected Times")
 
+            num_selected = len(selected_times_trend)
             st.markdown(
-                f"{len(selected_times_trend)} of {num_times} times selected"
+                f"{num_selected} of {num_times} times selected"
                 f"<span style='color:gray; margin-left:6px; cursor:help;' "
                 f"title='Only times that exceed their moving average are selected'>ⓘ</span>",
                 unsafe_allow_html=True
             )
 
-            st.markdown(', '.join(selected_times_trend))
-            st.markdown(', '.join(local_times))
+            top_row = ', '.join(selected_times_trend)
+            bottom_row = ', '.join(local_times)
+            st.markdown(f"{top_row}")
+            st.markdown(f"{bottom_row}")
 
         with time_col2:
             st.markdown("#### Trend Ranking Range")
-            st.markdown(f"{trend_start.strftime('%Y-%m-%d')} to {trend_end.strftime('%Y-%m-%d')} "
-                        f"({trend_ranking_days} trading days)")
-            st.markdown(f"{trend_smoothing_days}-day {trend_smoothing_type.upper()} moving average")
+            st.markdown(
+                f"{trend_start.strftime('%Y-%m-%d')} to {trend_end.strftime('%Y-%m-%d')} "
+                f"({trend_ranking_days} trading days)"
+            )
+            st.markdown(
+                f"{trend_smoothing_days}-day {trend_smoothing_type.upper()} moving average"
+            )
 
-    # --- Daily PnL computation and plotting
-    daily_slot_pnl = compute_daily_slot_pnl(filtered_df)
+    # --- Create Daily PnL per Slot
+    daily_slot_pnl = compute_daily_slot_pnl(day_filtered_df)
+
+    # --- Plot all entry slots, highlight selected
+    trend_check_date = pd.to_datetime(trend_check_date)
+    trend_check_monday = trend_check_date - pd.Timedelta(days=trend_check_date.weekday())
 
     plot_slot_equity_curves_plotly(
         daily_slot_pnl=daily_slot_pnl,
-        ema_df=filtered_df,
+        ema_df=day_filtered_df,
         ranking_window=trend_ranking_days,
         smoothing_window=trend_smoothing_days,
         smoothing_type=trend_smoothing_type,
         selected_times=selected_times_trend if not show_all_times else None,
         columns=2,
-        lookback_end=monday - pd.Timedelta(days=1),
+        lookback_end=trend_check_monday - pd.Timedelta(days=1),
         highlight_times=selected_times_trend
     )
 
