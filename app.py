@@ -2095,7 +2095,7 @@ with tab6:
             entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (7, 12))
         with col2:
             rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (80, 160), step = 10)
-            smooth_min, smooth_max = st.slider("Smoothing Window Range", 5, 60, (5, 15), step = 5)
+            smooth_min, smooth_max = st.slider("Smoothing Window Range", 2, 40, (3, 12), step = 1)
             smooth_types = st.multiselect("Smoothing Types", options=["SMA", "EMA"], default=["SMA"])
 
         if st.button("🚀 Run Trend Stability Optimization"):
