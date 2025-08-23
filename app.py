@@ -2092,7 +2092,7 @@ with tab6:
         with col1:
             lastDay_default = ema_df['OpenDate'].max().date()
             lastDay = st.date_input("Select Last Day for Analysis", value=lastDay_default)
-            entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (7, 12))
+            entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (6, 11))
         with col2:
             rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (80, 160), step = 10)
             smooth_min, smooth_max = st.slider("Smoothing Window Range", 2, 40, (2, 10), step = 1)
