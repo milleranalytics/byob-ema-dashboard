@@ -2102,6 +2102,10 @@ with tab6:
             progress_container = st.empty()
             result_container = st.empty()
 
+            start_time = time.time()
+            last_completed = 0
+            last_total = 0
+
             entry_range = range(entry_min, entry_max + 1)
             ranking_windows = range(rank_min, rank_max + 1, 10)
             smoothing_windows = range(smooth_min, smooth_max + 1, 1) # Update this to 1 for more granularity
@@ -2123,8 +2127,14 @@ with tab6:
                 ):
                     all_results = batch_results
                     progress.progress(completed / total, text=f"🔍 {completed:,}/{total:,} combinations tested...")
+                    last_completed = completed
+                    last_total = total
 
             df = pd.DataFrame(all_results)
+
+            elapsed = int(time.time() - start_time)
+            minutes, seconds = divmod(elapsed, 60)
+            progress_container.empty()
 
             if df.empty:
                 st.warning("⚠️ No stable results found.")
@@ -2140,10 +2150,33 @@ with tab6:
                     .round(2)
                 )
 
-                st.success("✅ Stability optimization complete.")
+                st.success(f"✅ Stability optimization complete. ({last_completed:,} combinations tested in {minutes}m {seconds}s)")
                 st.markdown("Top Results:")
 
-                st.dataframe(summary.head(20), use_container_width=True, height=735)
+                # Build styled table like Tab 7
+                fig = go.Figure(data=[go.Table(
+                    header=dict(
+                        values=list(summary.head(20).columns),
+                        align='center',
+                        font=dict(size=14, color='white'),
+                        fill_color='rgba(50,50,50,1)',
+                        height=30
+                    ),
+                    cells=dict(
+                        values=[summary.head(20)[col] for col in summary.head(20).columns],
+                        align='center',
+                        font=dict(size=14),
+                        fill_color='rgba(0,0,0,0)',
+                        height=28
+                    )
+                )])
+
+                fig.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=520)
+
+                # Center the table, not full width
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    st.plotly_chart(fig, use_container_width=True)
 # endregion
     
 
