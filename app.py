@@ -2171,7 +2171,7 @@ with tab6:
                     )
                 )])
 
-                fig.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=520)
+                fig.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=650)
 
                 # Center the table, not full width
                 col1, col2, col3 = st.columns([1, 2, 1])
