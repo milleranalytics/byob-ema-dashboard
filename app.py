@@ -123,64 +123,68 @@ default_start_date = max(one_year_ago, min_date)  # Prevent going earlier than d
 
 # region --- ✨ User Input Layout
 # -----------------------------------------------------
-col1, col2, col3 = st.columns(3)
+# ---- Layout tuning
+st.set_page_config(layout="wide")
+GAP = "small"
 
-# --- 📅 Column 1: Dates
+col1, col2, col3 = st.columns(3, gap=GAP)
+
+# ========== 📅 Column 1: Calendar info ==========
 with col1:
-    # Dates on the same row
-    c1, c2 = st.columns([1, 1], gap="small")
-    with c1:
+    # Row 1: Start / End on the same line
+    r1c1, r1c2 = st.columns([1, 1], gap=GAP)
+    with r1c1:
         start_date = st.date_input(
             "Start Date",
             value=default_start_date,
             min_value=min_date,
             max_value=max_date,
-            help="First day of the backtest period. Only trades after this date are included"
+            help="First day of the backtest period. Only trades after this date are included."
         )
-    with c2:
+    with r1c2:
         end_date = st.date_input(
             "End Date",
             value=max_date,
             min_value=min_date,
             max_value=max_date,
-            help="First day of the backtest period. Only trades after this date are included"
+            help="Last day of the backtest period. Only trades on/before this date are included."
         )
-        
-    # Guard against Start > End (keeps app from erroring if user clicks out-of-order)
+
+    # Guard against Start > End
     if start_date > end_date:
         st.warning("Start Date is after End Date — adjusting End Date to match Start Date.")
         end_date = start_date
 
-    # Calendar-effect filters (chip-style multi-select)
-    # FOMC selection does nothing, but it's there as a visual reminder that it's excluded from the data set in the UI
+    # Row 2: Filter multi-select (full width)
     filter_out = st.multiselect(
         "Filter out",
         options=["EOM", "EOQ", "FOMC"],
         default=filter_out,
-        help="Exclude last trading day of Month/Quarter from all analyses/backtests.",
+        help="Exclude last trading day of Month/Quarter (FOMC dates are already excluded in the dataset).",
     )
+    # Do not include FOMC dates even if backtests show good results because you have high risk of wide bid/ask
+    # spreads and very bad slippage which would not be accounted for in the backtests as those assume a static slippage value.
 
-    selection_method = st.selectbox(
-        "Entry Time Selection Method",
-        options=["Time Trends", "Average PCR"],
-        index=0,
-        help="Choose how entry times are selected each period. 'Average PCR' uses a 3-tiered lookback. 'Time Trends' uses cumulative performance with trend filtering."
-    )
-
-# --- 💵 Column 2: Risk + Entries
+# ========== 💵 Column 2: Risk ==========
 with col2:
-    equity_start = st.number_input(
-        "Starting Equity ($)",
-        value=equity_start,
-        step=10_000,
-        help="Your starting account size..."
-    )   
-    risk = st.number_input(
-        "Risk per Day (%)",
-        value=risk,
-        step=0.1,
-        help="Max % of equity you're willing to risk per day. Example: 4% of $400,000 = $16,000."
-    )
+    # Row 1: Equity / Risk on same line
+    r1c1, r1c2 = st.columns([1, 1], gap=GAP)
+    with r1c1:
+        equity_start = st.number_input(
+            "Starting Equity ($)",
+            value=equity_start,
+            step=10_000,
+            help="Your starting account size."
+        )
+    with r1c2:
+        risk = st.number_input(
+            "Risk per Day (%)",
+            value=risk,
+            step=0.1,
+            help="Max % of equity you're willing to risk per day (e.g., 4% of $400,000 = $16,000)."
+        )
+
+    # Row 2: Entries slider (full width)
     num_times = st.slider(
         "Number of Entries",
         min_value=2,
@@ -189,53 +193,76 @@ with col2:
         help="Number of entry times selected each day."
     )
 
-# --- 🔎 Column 3: Dynamic Lookback or Trend Options
+# ========== 🔎 Column 3: Strategy Inputs ==========
 with col3:
+    # Row 1: Selection method (horizontal, compact)
+    selection_method = st.selectbox(
+        "Entry Time Selection Method",
+        options=["Time Trends", "Average PCR"],
+        index=0,
+        help="Choose how entry times are selected each period."
+    )
+
+    # Row 2: All strategy inputs on one line (3 controls), labels collapsed to save vertical space
     if selection_method == "Average PCR":
-        man_near = st.number_input(
-            "Near Lookback (months)",
-            value=man_near,
-            step=1,
-            min_value=1,
-            help="Short-term lookback period in months used to find best entry times."
-        )
-        man_mid = st.number_input(
-            "Mid Lookback (months)",
-            value=man_mid,
-            step=1,
-            min_value=1,
-            help="Medium-term lookback period in months to smooth entry time selection."
-        )
-        man_long = st.number_input(
-            "Long Lookback (months)",
-            value=man_long,
-            step=1,
-            min_value=1,
-            help="Long-term lookback period in months to stabilize entry time selection."
-        )
+        c1, c2, c3 = st.columns(3, gap=GAP)
+        with c1:
+            man_near = st.number_input(
+                "Near Lookback",
+                value=man_near,
+                step=1,
+                min_value=1,
+                label_visibility="visible",  # short label works well here
+                help="Near lookback (months)."
+            )
+        with c2:
+            man_mid = st.number_input(
+                "Mid Lookback",
+                value=man_mid,
+                step=1,
+                min_value=1,
+                label_visibility="visible",
+                help="Mid lookback (months)."
+            )
+        with c3:
+            man_long = st.number_input(
+                "Far Lookback",
+                value=man_long,
+                step=1,
+                min_value=1,
+                label_visibility="visible",
+                help="Far lookback (months)."
+            )
     else:
-        trend_ranking_days = st.number_input(
-            "Trend Ranking Window (Days)",
-            value=trend_ranking_days,
-            step=5,
-            min_value=10,
-            max_value=250,
-            help="Number of recent trading days to rank entry times on cumulative performance."
-        )
-        trend_smoothing_days = st.number_input(
-            "Moving Average Length",
-            value=trend_smoothing_days,
-            step=1,
-            min_value=2,
-            max_value=60,
-            help="Length of moving average used to confirm upward trend in entry time."
-        )
-        trend_smoothing_type = st.selectbox(
-            "Moving Average Type",
-            options=["SMA", "EMA"],
-            index=0 if trend_smoothing_type == "SMA" else 1,
-            help="Type of moving average used for trend confirmation."
-        )
+        c1, c2, c3 = st.columns(3, gap=GAP)
+        with c1:
+            trend_ranking_days = st.number_input(
+                "Ranking Window",
+                value=trend_ranking_days,
+                step=5,
+                min_value=10,
+                max_value=250,
+                label_visibility="visible",
+                help="Days used to rank entry times by cumulative performance."
+            )
+        with c2:
+            trend_smoothing_days = st.number_input(
+                "MA Length",
+                value=trend_smoothing_days,
+                step=1,
+                min_value=2,
+                max_value=60,
+                label_visibility="visible",
+                help="Length of the moving average used for confirmation."
+            )
+        with c3:
+            trend_smoothing_type = st.selectbox(
+                "MA Type",
+                options=["SMA", "EMA"],
+                index=0 if trend_smoothing_type == "SMA" else 1,
+                label_visibility="visible",
+                help="Type of moving average."
+            )
 # endregion
 
 
