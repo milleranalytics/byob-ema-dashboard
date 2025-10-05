@@ -1644,7 +1644,8 @@ def plot_slot_equity_curves_plotly(
 def get_selected_times(
     ema_df, end_date, num_times,
     ranking_window, smoothing_window,
-    smoothing_type, selected_day
+    smoothing_type, selected_day,
+    trade_direction
 ):
     return select_times_via_time_trends(
         ema_df=ema_df,
@@ -1667,7 +1668,7 @@ with tab4:
     st.subheader("Entry Time Trends")
 
     # --- Input Header Row Layout
-    trend_col1, trend_col2, trend_col3, trend_col4 = st.columns([2, 2, 2, 1.5])
+    trend_col1, trend_col2, trend_col3, trend_col4, trend_col5 = st.columns([2, 2, 2, 1.5, 2])
 
     with trend_col1:
         max_available_date = ema_df['OpenDate'].max().date()
@@ -1676,7 +1677,7 @@ with tab4:
         default_trend_date = max_available_date + datetime.timedelta(days=days_until_next_monday or 7)
 
         trend_check_date = st.date_input(
-            "Select Date to Inspect (Entry Times from that Week)",
+            "Select Date to Inspect",
             value=default_trend_date,
             min_value=ema_df['OpenDate'].min().date(),
             max_value=future_limit
@@ -1695,46 +1696,56 @@ with tab4:
             options=["All Days", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
         )
 
-        # Apply day-of-week filter if not 'All Days'
-        if selected_day != "All Days":
-            day_filtered_df = ema_df[ema_df['DayOfWeek'] == selected_day]
-        else:
-            day_filtered_df = ema_df
-
     with trend_col4:
-        st.markdown("###### ")  # <-- pushes toggle downward for alignment
+        trade_direction = st.selectbox(
+            "Trade Direction:",
+            options=["Both", "Calls", "Puts"],
+            index=0,
+            help="Filter to show only Calls (OptionType = 'C'), Puts (OptionType = 'P'), or Both."
+        )
+
+    with trend_col5:
+        st.markdown("###### ")
         show_all_times = st.toggle(
             "Show All Entry Times",
             value=False,
             help="If enabled, all entry time graphs will be shown. Otherwise, only selected times will be displayed."
         )
 
-    # --- Compute Monday of selected week
-    monday = pd.to_datetime(trend_check_date) - pd.Timedelta(days=trend_check_date.weekday())
 
-    # --- Calculate trend date range (rolling N trading days before Monday)
-    trading_days = sorted(day_filtered_df['OpenDate'].unique())
+    # --- Apply filtering based on day of week and direction
+    filtered_df = ema_df.copy()
+
+    if selected_day != "All Days":
+        filtered_df = filtered_df[filtered_df['DayOfWeek'] == selected_day]
+
+    if trade_direction == "Calls":
+        filtered_df = filtered_df[filtered_df['OptionType'] == 'C']
+    elif trade_direction == "Puts":
+        filtered_df = filtered_df[filtered_df['OptionType'] == 'P']
+
+    # --- Calculate lookback date range
+    monday = pd.to_datetime(trend_check_date) - pd.Timedelta(days=trend_check_date.weekday())
+    trading_days = sorted(filtered_df['OpenDate'].unique())
     prior_trading_days = [d for d in trading_days if d < monday]
     recent_trading_days = prior_trading_days[-trend_ranking_days:]
 
-    if recent_trading_days:
-        trend_start = recent_trading_days[0]
-        trend_end = recent_trading_days[-1]
-    else:
-        trend_start = trend_end = None
+    trend_start = recent_trading_days[0] if recent_trading_days else None
+    trend_end = recent_trading_days[-1] if recent_trading_days else None
 
-    # --- Select times using Time Trend method for this week
+    # --- Select best times
     selected_times_trend = get_selected_times(
-        ema_df=day_filtered_df,
+        ema_df=filtered_df,
         end_date=monday - pd.Timedelta(days=1),
         num_times=num_times,
         ranking_window=trend_ranking_days,
         smoothing_window=trend_smoothing_days,
         smoothing_type=trend_smoothing_type,
-        selected_day=selected_day  # force the cache to see this UI dependency
+        selected_day=selected_day,
+        trade_direction=trade_direction  # ensure cache works properly
     )
 
-    # --- Local Time conversion
+    # --- Display local times
     def convert_to_local(open_times, timezone_str):
         offset = {
             'US/Eastern': 0,
@@ -1752,52 +1763,41 @@ with tab4:
 
     local_times = convert_to_local(selected_times_trend, timezone)
 
-    # --- Display Trend Range and Times
+    # --- Summary display
     if trend_start and trend_end:
         time_col1, time_col2 = st.columns([1.13, 1])
 
         with time_col1:
             st.markdown("#### Selected Times")
 
-            num_selected = len(selected_times_trend)
             st.markdown(
-                f"{num_selected} of {num_times} times selected"
+                f"{len(selected_times_trend)} of {num_times} times selected"
                 f"<span style='color:gray; margin-left:6px; cursor:help;' "
                 f"title='Only times that exceed their moving average are selected'>ⓘ</span>",
                 unsafe_allow_html=True
             )
 
-            top_row = ', '.join(selected_times_trend)
-            bottom_row = ', '.join(local_times)
-            st.markdown(f"{top_row}")
-            st.markdown(f"{bottom_row}")
+            st.markdown(', '.join(selected_times_trend))
+            st.markdown(', '.join(local_times))
 
         with time_col2:
             st.markdown("#### Trend Ranking Range")
-            st.markdown(
-                f"{trend_start.strftime('%Y-%m-%d')} to {trend_end.strftime('%Y-%m-%d')} "
-                f"({trend_ranking_days} trading days)"
-            )
-            st.markdown(
-                f"{trend_smoothing_days}-day {trend_smoothing_type.upper()} moving average"
-            )
+            st.markdown(f"{trend_start.strftime('%Y-%m-%d')} to {trend_end.strftime('%Y-%m-%d')} "
+                        f"({trend_ranking_days} trading days)")
+            st.markdown(f"{trend_smoothing_days}-day {trend_smoothing_type.upper()} moving average")
 
-    # --- Create Daily PnL per Slot
-    daily_slot_pnl = compute_daily_slot_pnl(day_filtered_df)
-
-    # --- Plot all entry slots, highlight selected
-    trend_check_date = pd.to_datetime(trend_check_date)
-    trend_check_monday = trend_check_date - pd.Timedelta(days=trend_check_date.weekday())
+    # --- Daily PnL computation and plotting
+    daily_slot_pnl = compute_daily_slot_pnl(filtered_df)
 
     plot_slot_equity_curves_plotly(
         daily_slot_pnl=daily_slot_pnl,
-        ema_df=day_filtered_df,
+        ema_df=filtered_df,
         ranking_window=trend_ranking_days,
         smoothing_window=trend_smoothing_days,
         smoothing_type=trend_smoothing_type,
         selected_times=selected_times_trend if not show_all_times else None,
         columns=2,
-        lookback_end=trend_check_monday - pd.Timedelta(days=1),
+        lookback_end=monday - pd.Timedelta(days=1),
         highlight_times=selected_times_trend
     )
 
@@ -2092,15 +2092,19 @@ with tab6:
         with col1:
             lastDay_default = ema_df['OpenDate'].max().date()
             lastDay = st.date_input("Select Last Day for Analysis", value=lastDay_default)
-            entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (7, 12))
+            entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (6, 11))
         with col2:
             rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (80, 160), step = 10)
-            smooth_min, smooth_max = st.slider("Smoothing Window Range", 5, 60, (5, 15), step = 5)
-            smooth_types = st.multiselect("Smoothing Types", options=["SMA", "EMA"], default=["SMA"])
+            smooth_min, smooth_max = st.slider("Smoothing Window Range", 2, 40, (2, 10), step = 1)
+            smooth_types = st.multiselect("Smoothing Types", options=["SMA", "EMA"], default=["SMA", "EMA"])
 
         if st.button("🚀 Run Trend Stability Optimization"):
             progress_container = st.empty()
             result_container = st.empty()
+
+            start_time = time.time()
+            last_completed = 0
+            last_total = 0
 
             entry_range = range(entry_min, entry_max + 1)
             ranking_windows = range(rank_min, rank_max + 1, 10)
@@ -2123,8 +2127,14 @@ with tab6:
                 ):
                     all_results = batch_results
                     progress.progress(completed / total, text=f"🔍 {completed:,}/{total:,} combinations tested...")
+                    last_completed = completed
+                    last_total = total
 
             df = pd.DataFrame(all_results)
+
+            elapsed = int(time.time() - start_time)
+            minutes, seconds = divmod(elapsed, 60)
+            progress_container.empty()
 
             if df.empty:
                 st.warning("⚠️ No stable results found.")
@@ -2140,10 +2150,33 @@ with tab6:
                     .round(2)
                 )
 
-                st.success("✅ Stability optimization complete.")
+                st.success(f"✅ Stability optimization complete. ({last_completed:,} combinations tested in {minutes}m {seconds}s)")
                 st.markdown("Top Results:")
 
-                st.dataframe(summary.head(20), use_container_width=True, height=735)
+                # Build styled table like Tab 7
+                fig = go.Figure(data=[go.Table(
+                    header=dict(
+                        values=list(summary.head(20).columns),
+                        align='center',
+                        font=dict(size=14, color='white'),
+                        fill_color='rgba(50,50,50,1)',
+                        height=30
+                    ),
+                    cells=dict(
+                        values=[summary.head(20)[col] for col in summary.head(20).columns],
+                        align='center',
+                        font=dict(size=14),
+                        fill_color='rgba(0,0,0,0)',
+                        height=28
+                    )
+                )])
+
+                fig.update_layout(margin=dict(l=20, r=20, t=30, b=20), height=650)
+
+                # Center the table, not full width
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col2:
+                    st.plotly_chart(fig, use_container_width=True)
 # endregion
     
 
