@@ -7,9 +7,9 @@
   "equity_start": 300000,
   "credit_target": 3.1,
   "trend_ranking_days": 120,
-  "trend_smoothing_days": 9,
-  "trend_smoothing_type": "SMA",
-  "selection_method": "Average PCR",
+  "trend_smoothing_days": 11,
+  "trend_smoothing_type": "EMA",
+  "selection_method": "Time Trends",
   "filter_out": [
     "EOM",
     "FOMC"

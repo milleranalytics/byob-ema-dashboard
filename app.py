@@ -2251,11 +2251,24 @@ with tab6:
         with col1:
             lastDay_default = ema_df_cal['OpenDate'].max().date()
             lastDay = st.date_input("Select Last Day for Analysis", value=lastDay_default)
-            entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (6, 11))
+            entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (6, 10))
         with col2:
-            rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (90, 150), step = 10)
+            rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (90, 160), step = 10)
             smooth_min, smooth_max = st.slider("Smoothing Window Range", 2, 40, (3, 13), step = 1)
             smooth_types = st.multiselect("Smoothing Types", options=["SMA", "EMA"], default=["SMA", "EMA"])
+
+                # --- Show the hard-coded date windows used in the optimization
+        lastDay_dt = pd.to_datetime(lastDay)
+
+        # Keep the definition here in one place (mirrors what you pass to the generator)
+        window_months = [18, 12, 6]
+        rolling_windows = [(lastDay_dt - relativedelta(months=m), lastDay_dt) for m in window_months]
+
+        # Left column, bottom: make the implicit assumptions explicit
+        with col1:
+            st.markdown("Date Ranges Analyzed")
+            for m, (s, e) in zip(window_months, rolling_windows):
+                st.caption(f"{m} months  —  {s:%Y-%m-%d} to {e:%Y-%m-%d}")
 
         if st.button("🚀 Run Trend Stability Optimization"):
             progress_container = st.empty()
@@ -2269,7 +2282,7 @@ with tab6:
             ranking_windows = range(rank_min, rank_max + 1, 10)
             smoothing_windows = range(smooth_min, smooth_max + 1, 1) # Update this to 1 for more granularity
 
-            lastDay_dt = pd.to_datetime(lastDay)
+            # lastDay_dt = pd.to_datetime(lastDay)
             rolling_windows = [
                 (lastDay_dt - relativedelta(months=18), lastDay_dt),
                 (lastDay_dt - relativedelta(months=12), lastDay_dt),
