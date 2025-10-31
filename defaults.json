@@ -5,9 +5,9 @@
   "num_times": 8,
   "risk": 3.5,
   "equity_start": 300000,
-  "credit_target": 3.1,
+  "credit_target": 3.2,
   "trend_ranking_days": 120,
-  "trend_smoothing_days": 10,
+  "trend_smoothing_days": 11,
   "trend_smoothing_type": "EMA",
   "selection_method": "Time Trends",
   "filter_out": [
