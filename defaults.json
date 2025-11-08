@@ -6,9 +6,9 @@
   "risk": 3.5,
   "equity_start": 300000,
   "credit_target": 3.2,
-  "trend_ranking_days": 120,
-  "trend_smoothing_days": 10,
-  "trend_smoothing_type": "EMA",
+  "trend_ranking_days": 140,
+  "trend_smoothing_days": 14,
+  "trend_smoothing_type": "SMA",
   "selection_method": "Time Trends",
   "filter_out": [
     "EOM",

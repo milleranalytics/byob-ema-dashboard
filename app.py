@@ -2254,7 +2254,7 @@ with tab6:
             entry_min, entry_max = st.slider("Number of Entries per Day", 3, 20, (6, 10))
         with col2:
             rank_min, rank_max = st.slider("Ranking Window Range (Days)", 30, 200, (90, 160), step = 10)
-            smooth_min, smooth_max = st.slider("Smoothing Window Range", 2, 40, (3, 13), step = 1)
+            smooth_min, smooth_max = st.slider("Smoothing Window Range", 2, 40, (3, 15), step = 1)
             smooth_types = st.multiselect("Smoothing Types", options=["SMA", "EMA"], default=["SMA", "EMA"])
 
                 # --- Show the hard-coded date windows used in the optimization
